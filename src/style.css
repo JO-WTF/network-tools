@@ -72,6 +72,18 @@ h1 {
   color: #1e293b;
 }
 
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.card-header h2 {
+  margin-bottom: 0;
+}
+
 .dropzone {
   border: 1px dashed #cbd5f5;
   border-radius: 14px;
@@ -86,6 +98,11 @@ h1 {
 .dropzone.active {
   border-color: #2563eb;
   background: #eff6ff;
+}
+
+.dropzone.loaded {
+  border-color: #86efac;
+  background: #f0fdf4;
 }
 
 .dropzone input[type="file"] {
@@ -158,6 +175,25 @@ button:not(:disabled):hover {
   background: transparent;
   border: 1px solid #cbd5f5;
   color: #0f172a;
+}
+
+.icon-button {
+  border-radius: 12px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid #cbd5f5;
+  background: #ffffff;
+  color: #2563eb;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-button svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
 }
 
 .hint {
