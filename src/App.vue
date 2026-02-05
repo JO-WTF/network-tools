@@ -1,7 +1,24 @@
 <template>
   <div class="app-shell">
     <header class="app-header">
-      <h1>Excel 地址批量转经纬度</h1>
+      <div>
+        <h1>{{ headerTitle }}</h1>
+        <p class="sub-title">支持地址编码、经纬度解码、导航距离计算三种批量处理方式。</p>
+      </div>
+      <div class="mode-toggle" role="tablist" aria-label="功能切换">
+        <button
+          v-for="item in modeOptions"
+          :key="item.value"
+          type="button"
+          class="mode-button"
+          :class="{ active: mode === item.value }"
+          role="tab"
+          :aria-selected="mode === item.value"
+          @click="mode = item.value"
+        >
+          {{ item.label }}
+        </button>
+      </div>
     </header>
 
     <main class="layout">
@@ -32,15 +49,57 @@
 
         <div class="card">
           <h2>2. 配置解析</h2>
-          <label class="field">
-            <span>地址列名</span>
-            <select v-model="columnName">
-              <option value="" disabled>请选择列名</option>
-              <option v-for="header in headers" :key="header" :value="header">
-                {{ header }}
-              </option>
-            </select>
-          </label>
+          <div v-if="mode === 'geocode'">
+            <label class="field">
+              <span>地址列名</span>
+              <select v-model="columnName">
+                <option value="" disabled>请选择列名</option>
+                <option v-for="header in headers" :key="header" :value="header">
+                  {{ header }}
+                </option>
+              </select>
+            </label>
+          </div>
+          <div v-else-if="mode === 'reverse'">
+            <label class="field">
+              <span>纬度列名</span>
+              <select v-model="latColumnName">
+                <option value="" disabled>请选择列名</option>
+                <option v-for="header in headers" :key="header" :value="header">
+                  {{ header }}
+                </option>
+              </select>
+            </label>
+            <label class="field">
+              <span>经度列名</span>
+              <select v-model="lngColumnName">
+                <option value="" disabled>请选择列名</option>
+                <option v-for="header in headers" :key="header" :value="header">
+                  {{ header }}
+                </option>
+              </select>
+            </label>
+          </div>
+          <div v-else>
+            <label class="field">
+              <span>起始地列名</span>
+              <select v-model="startColumnName">
+                <option value="" disabled>请选择列名</option>
+                <option v-for="header in headers" :key="header" :value="header">
+                  {{ header }}
+                </option>
+              </select>
+            </label>
+            <label class="field">
+              <span>目的地列名</span>
+              <select v-model="endColumnName">
+                <option value="" disabled>请选择列名</option>
+                <option v-for="header in headers" :key="header" :value="header">
+                  {{ header }}
+                </option>
+              </select>
+            </label>
+          </div>
           <label class="field">
             <span>地图服务商</span>
             <select v-model="provider">
@@ -50,11 +109,11 @@
           </label>
           <label class="field">
             <span>API Key</span>
-            <input v-model="providerApiKey" type="password" placeholder="输入地理编码 API Key" />
+            <input v-model="providerApiKey" type="password" placeholder="输入服务商 API Key" />
           </label>
           <div class="actions">
-            <button class="primary" :disabled="!canStart" @click="startGeocode">
-              开始转换
+            <button class="primary" :disabled="!canStart" @click="handleStart">
+              {{ startLabel }}
             </button>
             <button class="secondary" :disabled="!canDownload" @click="downloadExcel">
               下载结果
@@ -66,7 +125,7 @@
           <h2>3. 进度</h2>
           <div class="progress">
             <div class="progress-row">
-              <span>当前地址</span>
+              <span>{{ progressLabel }}</span>
               <strong>{{ progress.current || "-" }}</strong>
             </div>
             <div class="progress-row">
@@ -130,11 +189,17 @@ const headers = ref([]);
 const rows = ref([]);
 const fileName = ref("");
 const columnName = ref("");
+const latColumnName = ref("");
+const lngColumnName = ref("");
+const startColumnName = ref("");
+const endColumnName = ref("");
 const provider = ref("mapbox");
 const providerApiKey = ref("");
 const mapApiKey = ref("");
 const logs = ref([]);
-const cache = new Map();
+const geocodeCache = new Map();
+const reverseCache = new Map();
+const routeCache = new Map();
 const mapContainer = ref(null);
 const mapLoaded = ref(false);
 const isDragging = ref(false);
@@ -145,6 +210,14 @@ const geocodeState = reactive({
   running: false,
 });
 const points = ref([]);
+const routeLine = ref(null);
+const mode = ref("geocode");
+
+const modeOptions = [
+  { value: "geocode", label: "地址编码" },
+  { value: "reverse", label: "经纬度解码" },
+  { value: "route", label: "导航距离计算" },
+];
 
 let mapInstance = null;
 let mapMarkers = [];
@@ -155,22 +228,52 @@ const storageKeys = {
   hereGeocode: "here_geocode_api_key",
   mapboxMap: "mapbox_map_api_key",
   columnName: "geocode_column_name",
+  latColumnName: "reverse_lat_column_name",
+  lngColumnName: "reverse_lng_column_name",
+  startColumnName: "route_start_column_name",
+  endColumnName: "route_end_column_name",
+  mode: "geocode_mode",
 };
 
 const getProviderStorageKey = (currentProvider) =>
   currentProvider === "mapbox" ? storageKeys.mapboxGeocode : storageKeys.hereGeocode;
 
 const canStart = computed(() => {
+  if (geocodeState.running || rows.value.length === 0 || !providerApiKey.value) {
+    return false;
+  }
+  if (mode.value === "geocode") {
+    return Boolean(columnName.value);
+  }
+  if (mode.value === "reverse") {
+    return Boolean(latColumnName.value && lngColumnName.value);
+  }
   return (
-    !geocodeState.running &&
-    rows.value.length > 0 &&
-    columnName.value &&
-    providerApiKey.value
+    Boolean(startColumnName.value && endColumnName.value)
   );
 });
 
 const canDownload = computed(() => rows.value.length > 0 && points.value.length > 0);
 const hasData = computed(() => rows.value.length > 0);
+const headerTitle = computed(() => {
+  if (mode.value === "reverse") {
+    return "Excel 经纬度批量解析地址";
+  }
+  if (mode.value === "route") {
+    return "Excel 批量导航距离计算";
+  }
+  return "Excel 地址批量转经纬度";
+});
+const startLabel = computed(() => {
+  if (mode.value === "reverse") return "开始解码";
+  if (mode.value === "route") return "开始计算";
+  return "开始转换";
+});
+const progressLabel = computed(() => {
+  if (mode.value === "reverse") return "当前经纬度";
+  if (mode.value === "route") return "当前路线";
+  return "当前地址";
+});
 
 const progress = computed(() => {
   const percent = geocodeState.total
@@ -191,6 +294,17 @@ const resetProgress = () => {
   geocodeState.processed = 0;
   geocodeState.current = "";
   geocodeState.running = false;
+};
+
+const resetResults = () => {
+  logs.value = [];
+  points.value = [];
+  routeLine.value = null;
+  geocodeCache.clear();
+  reverseCache.clear();
+  routeCache.clear();
+  resetProgress();
+  refreshMarkers();
 };
 
 const loadFile = (file) => {
@@ -220,10 +334,31 @@ const loadFile = (file) => {
     } else {
       columnName.value = headers.value[0] || "";
     }
-    logs.value = [];
-    points.value = [];
-    cache.clear();
-    resetProgress();
+    const savedLatColumn = localStorage.getItem(storageKeys.latColumnName);
+    if (savedLatColumn && headers.value.includes(savedLatColumn)) {
+      latColumnName.value = savedLatColumn;
+    } else {
+      latColumnName.value = guessColumn(headers.value, ["纬度", "lat"]);
+    }
+    const savedLngColumn = localStorage.getItem(storageKeys.lngColumnName);
+    if (savedLngColumn && headers.value.includes(savedLngColumn)) {
+      lngColumnName.value = savedLngColumn;
+    } else {
+      lngColumnName.value = guessColumn(headers.value, ["经度", "lng", "lon"]);
+    }
+    const savedStartColumn = localStorage.getItem(storageKeys.startColumnName);
+    if (savedStartColumn && headers.value.includes(savedStartColumn)) {
+      startColumnName.value = savedStartColumn;
+    } else {
+      startColumnName.value = headers.value[0] || "";
+    }
+    const savedEndColumn = localStorage.getItem(storageKeys.endColumnName);
+    if (savedEndColumn && headers.value.includes(savedEndColumn)) {
+      endColumnName.value = savedEndColumn;
+    } else {
+      endColumnName.value = headers.value[1] || headers.value[0] || "";
+    }
+    resetResults();
   };
   reader.readAsArrayBuffer(file);
 };
@@ -259,10 +394,15 @@ const fillMockData = () => {
   ];
   columnName.value = "地址";
   fileName.value = "mock.xlsx";
-  logs.value = [];
-  points.value = [];
-  cache.clear();
-  resetProgress();
+  resetResults();
+};
+
+const guessColumn = (headerList, keywords) => {
+  const lowered = headerList.map((header) => header.toLowerCase());
+  const hitIndex = lowered.findIndex((header) =>
+    keywords.some((keyword) => header.includes(keyword))
+  );
+  return headerList[hitIndex] || "";
 };
 
 const buildAddressMap = () => {
@@ -282,6 +422,7 @@ const startGeocode = async () => {
   if (!canStart.value) return;
   logs.value = [];
   points.value = [];
+  routeLine.value = null;
   geocodeState.running = true;
   geocodeState.processed = 0;
   geocodeState.current = "";
@@ -291,10 +432,10 @@ const startGeocode = async () => {
 
   for (const [address, indices] of addressMap.entries()) {
     geocodeState.current = address;
-    let result = cache.get(address);
+    let result = geocodeCache.get(address);
     if (!result) {
       result = await geocodeAddress(address);
-      cache.set(address, result);
+      geocodeCache.set(address, result);
     }
     geocodeState.processed += 1;
 
@@ -317,6 +458,143 @@ const startGeocode = async () => {
   geocodeState.running = false;
   geocodeState.current = "";
   refreshMarkers();
+};
+
+const startReverseGeocode = async () => {
+  if (!canStart.value) return;
+  logs.value = [];
+  points.value = [];
+  routeLine.value = null;
+  geocodeState.running = true;
+  geocodeState.processed = 0;
+  geocodeState.current = "";
+  geocodeState.total = rows.value.length;
+
+  for (const row of rows.value) {
+    const lat = Number(row[latColumnName.value]);
+    const lng = Number(row[lngColumnName.value]);
+    const key = `${lat},${lng}`;
+    geocodeState.current = key;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      logs.value.push({
+        address: key,
+        type: "invalid",
+        request: "输入格式错误",
+        response: "纬度或经度不是有效数字",
+      });
+      geocodeState.processed += 1;
+      continue;
+    }
+    let result = reverseCache.get(key);
+    if (!result) {
+      result = await reverseGeocode(lat, lng);
+      reverseCache.set(key, result);
+    }
+    geocodeState.processed += 1;
+    if (result.success) {
+      row.解析地址 = result.address;
+      row.一级行政区 = result.admin1;
+      row.二级行政区 = result.admin2;
+      row.三级行政区 = result.admin3;
+      points.value.push({ lat, lng, type: "point" });
+    } else {
+      logs.value.push({
+        address: key,
+        type: result.type,
+        request: result.request,
+        response: result.response,
+      });
+    }
+  }
+
+  geocodeState.running = false;
+  geocodeState.current = "";
+  refreshMarkers();
+};
+
+const startRoute = async () => {
+  if (!canStart.value) return;
+  logs.value = [];
+  points.value = [];
+  routeLine.value = null;
+  geocodeState.running = true;
+  geocodeState.processed = 0;
+  geocodeState.current = "";
+  geocodeState.total = rows.value.length;
+
+  for (const row of rows.value) {
+    const origin = String(row[startColumnName.value] ?? "").trim();
+    const destination = String(row[endColumnName.value] ?? "").trim();
+    const routeKey = `${origin}=>${destination}`;
+    geocodeState.current = routeKey;
+    if (!origin || !destination) {
+      logs.value.push({
+        address: routeKey,
+        type: "invalid",
+        request: "输入格式错误",
+        response: "起始地或目的地为空",
+      });
+      geocodeState.processed += 1;
+      continue;
+    }
+    let result = routeCache.get(routeKey);
+    if (!result) {
+      const originResult = geocodeCache.get(origin) || (await geocodeAddress(origin));
+      geocodeCache.set(origin, originResult);
+      const destinationResult =
+        geocodeCache.get(destination) || (await geocodeAddress(destination));
+      geocodeCache.set(destination, destinationResult);
+      if (!originResult.success || !destinationResult.success) {
+        const failure = !originResult.success ? originResult : destinationResult;
+        result = {
+          success: false,
+          type: failure.type,
+          request: failure.request,
+          response: failure.response,
+        };
+      } else {
+        result = await fetchRoute(
+          originResult.lat,
+          originResult.lng,
+          destinationResult.lat,
+          destinationResult.lng
+        );
+      }
+      routeCache.set(routeKey, result);
+    }
+    geocodeState.processed += 1;
+
+    if (result.success) {
+      row["导航距离(km)"] = result.distanceKm;
+      row["导航时间(min)"] = result.durationMin;
+      points.value.push(
+        { lat: result.origin.lat, lng: result.origin.lng, type: "origin" },
+        { lat: result.destination.lat, lng: result.destination.lng, type: "destination" }
+      );
+      routeLine.value = result.line;
+    } else {
+      logs.value.push({
+        address: routeKey,
+        type: result.type,
+        request: result.request,
+        response: result.response,
+      });
+    }
+  }
+
+  geocodeState.running = false;
+  geocodeState.current = "";
+  refreshMarkers();
+};
+
+const handleStart = () => {
+  if (mode.value === "reverse") {
+    startReverseGeocode();
+  } else if (mode.value === "route") {
+    startRoute();
+  } else {
+    startGeocode();
+  }
 };
 
 const geocodeAddress = async (address) => {
@@ -342,9 +620,9 @@ const geocodeAddress = async (address) => {
           response: JSON.stringify(body),
         };
       }
-      const [lng, lat] = body.features[0].center;
-      return { success: true, lat, lng };
-    } catch (error) {
+    const [lng, lat] = body.features[0].center;
+    return { success: true, lat, lng };
+  } catch (error) {
       return {
         success: false,
         type: "network_error",
@@ -386,18 +664,290 @@ const geocodeAddress = async (address) => {
   }
 };
 
+const reverseGeocode = async (lat, lng) => {
+  if (provider.value === "mapbox") {
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${providerApiKey.value}`;
+    try {
+      const response = await fetch(url);
+      const body = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          type: "network_error",
+          request: url,
+          response: JSON.stringify(body),
+        };
+      }
+      if (!body.features || body.features.length === 0) {
+        return {
+          success: false,
+          type: "no_result",
+          request: url,
+          response: JSON.stringify(body),
+        };
+      }
+      const feature = body.features[0];
+      const { admin1, admin2, admin3 } = extractMapboxAdmin(feature);
+      return {
+        success: true,
+        address: feature.place_name,
+        admin1,
+        admin2,
+        admin3,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        type: "network_error",
+        request: url,
+        response: String(error),
+      };
+    }
+  }
+
+  const url = `https://revgeocode.search.hereapi.com/v1/revgeocode?at=${lat},${lng}&lang=zh-CN&apiKey=${providerApiKey.value}`;
+  try {
+    const response = await fetch(url);
+    const body = await response.json();
+    if (!response.ok) {
+      return {
+        success: false,
+        type: "network_error",
+        request: url,
+        response: JSON.stringify(body),
+      };
+    }
+    if (!body.items || body.items.length === 0) {
+      return {
+        success: false,
+        type: "no_result",
+        request: url,
+        response: JSON.stringify(body),
+      };
+    }
+    const address = body.items[0].address || {};
+    return {
+      success: true,
+      address: body.items[0].title || "",
+      admin1: address.state || address.province || "",
+      admin2: address.city || address.county || "",
+      admin3: address.district || address.subdistrict || address.county || "",
+    };
+  } catch (error) {
+    return {
+      success: false,
+      type: "network_error",
+      request: url,
+      response: String(error),
+    };
+  }
+};
+
+const fetchRoute = async (originLat, originLng, destLat, destLng) => {
+  if (provider.value === "mapbox") {
+    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${originLng},${originLat};${destLng},${destLat}?geometries=geojson&overview=full&access_token=${providerApiKey.value}`;
+    try {
+      const response = await fetch(url);
+      const body = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          type: "network_error",
+          request: url,
+          response: JSON.stringify(body),
+        };
+      }
+      if (!body.routes || body.routes.length === 0) {
+        return {
+          success: false,
+          type: "no_result",
+          request: url,
+          response: JSON.stringify(body),
+        };
+      }
+      const route = body.routes[0];
+      return {
+        success: true,
+        distanceKm: (route.distance / 1000).toFixed(2),
+        durationMin: Math.round(route.duration / 60),
+        line: route.geometry,
+        origin: { lat: originLat, lng: originLng },
+        destination: { lat: destLat, lng: destLng },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        type: "network_error",
+        request: url,
+        response: String(error),
+      };
+    }
+  }
+
+  const url = `https://router.hereapi.com/v8/routes?transportMode=car&origin=${originLat},${originLng}&destination=${destLat},${destLng}&return=summary,polyline&apiKey=${providerApiKey.value}`;
+  try {
+    const response = await fetch(url);
+    const body = await response.json();
+    if (!response.ok) {
+      return {
+        success: false,
+        type: "network_error",
+        request: url,
+        response: JSON.stringify(body),
+      };
+    }
+    if (!body.routes || body.routes.length === 0) {
+      return {
+        success: false,
+        type: "no_result",
+        request: url,
+        response: JSON.stringify(body),
+      };
+    }
+    const route = body.routes[0];
+    const summary = route.sections?.[0]?.summary;
+    const polyline = route.sections?.[0]?.polyline;
+    const geometry = polyline ? decodeHerePolyline(polyline) : null;
+    return {
+      success: true,
+      distanceKm: summary ? (summary.length / 1000).toFixed(2) : "",
+      durationMin: summary ? Math.round(summary.duration / 60) : "",
+      line: geometry,
+      origin: { lat: originLat, lng: originLng },
+      destination: { lat: destLat, lng: destLng },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      type: "network_error",
+      request: url,
+      response: String(error),
+    };
+  }
+};
+
+const extractMapboxAdmin = (feature) => {
+  const context = feature.context || [];
+  const place = context.find((item) => item.id?.startsWith("place"))?.text || "";
+  const district = context.find((item) => item.id?.startsWith("district"))?.text || "";
+  const region = context.find((item) => item.id?.startsWith("region"))?.text || "";
+  const locality = context.find((item) => item.id?.startsWith("locality"))?.text || "";
+  return {
+    admin1: region || place || "",
+    admin2: place || locality || "",
+    admin3: district || locality || "",
+  };
+};
+
+const decodeHerePolyline = (polyline) => {
+  const decoder = new HerePolylineDecoder(polyline);
+  const coordinates = [];
+  while (decoder.hasNext()) {
+    const { lat, lng } = decoder.next();
+    coordinates.push([lng, lat]);
+  }
+  return {
+    type: "LineString",
+    coordinates,
+  };
+};
+
+class HerePolylineDecoder {
+  constructor(encoded) {
+    this.encoded = encoded;
+    this.index = 0;
+    this.lat = 0;
+    this.lng = 0;
+    this.z = 0;
+    this.precision = 5;
+    this.thirdDim = 0;
+    this.thirdDimPrecision = 0;
+    this.headerDecoded = false;
+  }
+
+  hasNext() {
+    if (!this.headerDecoded) {
+      this.decodeHeader();
+    }
+    return this.index < this.encoded.length;
+  }
+
+  next() {
+    if (!this.headerDecoded) {
+      this.decodeHeader();
+    }
+    this.lat += this.decodeSigned();
+    this.lng += this.decodeSigned();
+    if (this.thirdDim) {
+      this.z += this.decodeSigned();
+    }
+    return {
+      lat: this.lat / Math.pow(10, this.precision),
+      lng: this.lng / Math.pow(10, this.precision),
+    };
+  }
+
+  decodeHeader() {
+    const header = this.decodeUnsigned();
+    this.precision = header & 15;
+    this.thirdDim = (header >> 4) & 7;
+    this.thirdDimPrecision = (header >> 7) & 15;
+    this.headerDecoded = true;
+  }
+
+  decodeUnsigned() {
+    let result = 0;
+    let shift = 0;
+    while (this.index < this.encoded.length) {
+      const value = this.encoded.charCodeAt(this.index++) - 63;
+      result |= (value & 31) << shift;
+      if (value < 32) {
+        return result;
+      }
+      shift += 5;
+    }
+    return result;
+  }
+
+  decodeSigned() {
+    const result = this.decodeUnsigned();
+    return result & 1 ? ~(result >> 1) : result >> 1;
+  }
+}
+
 const downloadExcel = () => {
-  const outputHeaders = [...headers.value, "纬度", "经度"];
+  const outputHeaders = getOutputHeaders();
   const data = [outputHeaders];
   rows.value.forEach((row) => {
     const rowData = headers.value.map((header) => row[header] ?? "");
-    rowData.push(row.纬度 ?? "", row.经度 ?? "");
+    if (mode.value === "geocode") {
+      rowData.push(row.纬度 ?? "", row.经度 ?? "");
+    } else if (mode.value === "reverse") {
+      rowData.push(
+        row.解析地址 ?? "",
+        row.一级行政区 ?? "",
+        row.二级行政区 ?? "",
+        row.三级行政区 ?? ""
+      );
+    } else {
+      rowData.push(row["导航距离(km)"] ?? "", row["导航时间(min)"] ?? "");
+    }
     data.push(rowData);
   });
   const worksheet = XLSX.utils.aoa_to_sheet(data);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "Geocode");
   XLSX.writeFile(workbook, `geocode_${fileName.value || "result.xlsx"}`);
+};
+
+const getOutputHeaders = () => {
+  if (mode.value === "reverse") {
+    return [...headers.value, "解析地址", "一级行政区", "二级行政区", "三级行政区"];
+  }
+  if (mode.value === "route") {
+    return [...headers.value, "导航距离(km)", "导航时间(min)"];
+  }
+  return [...headers.value, "纬度", "经度"];
 };
 
 const applyMapKey = () => {
@@ -431,19 +981,64 @@ const refreshMarkers = () => {
   if (!mapInstance) return;
   mapMarkers.forEach((marker) => marker.remove());
   mapMarkers = [];
+  updateRouteLayer();
   if (!points.value.length) return;
+  const bounds = new mapboxgl.LngLatBounds();
   points.value.forEach((point) => {
-    const marker = new mapboxgl.Marker({ color: "#2563eb" })
+    const color =
+      point.type === "origin" ? "#16a34a" : point.type === "destination" ? "#dc2626" : "#2563eb";
+    const marker = new mapboxgl.Marker({ color })
       .setLngLat([point.lng, point.lat])
       .addTo(mapInstance);
     mapMarkers.push(marker);
+    bounds.extend([point.lng, point.lat]);
   });
-  if (points.value.length === 1) {
-    mapInstance.flyTo({ center: [points.value[0].lng, points.value[0].lat], zoom: 12 });
+  if (routeLine.value?.coordinates?.length) {
+    routeLine.value.coordinates.forEach((coord) => bounds.extend(coord));
+  }
+  if (!bounds.isEmpty()) {
+    mapInstance.fitBounds(bounds, { padding: 80, maxZoom: 13 });
+  }
+};
+
+const updateRouteLayer = () => {
+  if (!mapInstance) return;
+  const sourceId = "route-line";
+  if (mapInstance.getLayer(sourceId)) {
+    mapInstance.removeLayer(sourceId);
+  }
+  if (mapInstance.getSource(sourceId)) {
+    mapInstance.removeSource(sourceId);
+  }
+  if (routeLine.value) {
+    mapInstance.addSource(sourceId, {
+      type: "geojson",
+      data: {
+        type: "Feature",
+        geometry: routeLine.value,
+      },
+    });
+    mapInstance.addLayer({
+      id: sourceId,
+      type: "line",
+      source: sourceId,
+      layout: {
+        "line-join": "round",
+        "line-cap": "round",
+      },
+      paint: {
+        "line-color": "#0ea5e9",
+        "line-width": 4,
+      },
+    });
   }
 };
 
 onMounted(() => {
+  const savedMode = localStorage.getItem(storageKeys.mode);
+  if (savedMode && modeOptions.some((item) => item.value === savedMode)) {
+    mode.value = savedMode;
+  }
   const savedProvider = localStorage.getItem(storageKeys.provider);
   if (savedProvider === "mapbox" || savedProvider === "here") {
     provider.value = savedProvider;
@@ -482,5 +1077,42 @@ watch(columnName, (value) => {
   } else {
     localStorage.removeItem(storageKeys.columnName);
   }
+});
+
+watch(latColumnName, (value) => {
+  if (value) {
+    localStorage.setItem(storageKeys.latColumnName, value);
+  } else {
+    localStorage.removeItem(storageKeys.latColumnName);
+  }
+});
+
+watch(lngColumnName, (value) => {
+  if (value) {
+    localStorage.setItem(storageKeys.lngColumnName, value);
+  } else {
+    localStorage.removeItem(storageKeys.lngColumnName);
+  }
+});
+
+watch(startColumnName, (value) => {
+  if (value) {
+    localStorage.setItem(storageKeys.startColumnName, value);
+  } else {
+    localStorage.removeItem(storageKeys.startColumnName);
+  }
+});
+
+watch(endColumnName, (value) => {
+  if (value) {
+    localStorage.setItem(storageKeys.endColumnName, value);
+  } else {
+    localStorage.removeItem(storageKeys.endColumnName);
+  }
+});
+
+watch(mode, (value) => {
+  localStorage.setItem(storageKeys.mode, value);
+  resetResults();
 });
 </script>
