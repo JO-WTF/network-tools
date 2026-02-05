@@ -7,10 +7,19 @@
     <main class="layout">
       <section class="panel">
         <div class="card">
-          <h2>1. 上传 Excel</h2>
+          <div class="card-header">
+            <h2>1. 上传 Excel</h2>
+            <button class="icon-button" type="button" @click="fillMockData" aria-label="一键填写 Mock 数据">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12 3l1.9 4.3L18 9.2l-4.1 1.9L12 15l-1.9-3.9L6 9.2l4.1-1.9L12 3zm7 9l.9 2.1L22 15l-2.1.9L19 18l-.9-2.1L16 15l2.1-.9L19 12zM4 13l.9 2.1L7 16l-2.1.9L4 19l-.9-2.1L1 16l2.1-.9L4 13z"
+                />
+              </svg>
+            </button>
+          </div>
           <div
             class="dropzone"
-            :class="{ active: isDragging }"
+            :class="{ active: isDragging, loaded: hasData }"
             @dragover.prevent="handleDragOver"
             @dragleave.prevent="handleDragLeave"
             @drop.prevent="handleFileDrop"
@@ -19,7 +28,6 @@
             <p>拖放 Excel 文件到此处，或点击选择</p>
           </div>
           <p v-if="fileName" class="hint">已加载：{{ fileName }}</p>
-          <button class="ghost" @click="fillMockData">一键填写 Mock 数据</button>
         </div>
 
         <div class="card">
@@ -114,7 +122,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import mapboxgl from "mapbox-gl";
 import * as XLSX from "xlsx";
 
@@ -141,6 +149,17 @@ const points = ref([]);
 let mapInstance = null;
 let mapMarkers = [];
 
+const storageKeys = {
+  provider: "geocode_provider",
+  mapboxGeocode: "mapbox_geocode_api_key",
+  hereGeocode: "here_geocode_api_key",
+  mapboxMap: "mapbox_map_api_key",
+  columnName: "geocode_column_name",
+};
+
+const getProviderStorageKey = (currentProvider) =>
+  currentProvider === "mapbox" ? storageKeys.mapboxGeocode : storageKeys.hereGeocode;
+
 const canStart = computed(() => {
   return (
     !geocodeState.running &&
@@ -151,6 +170,7 @@ const canStart = computed(() => {
 });
 
 const canDownload = computed(() => rows.value.length > 0 && points.value.length > 0);
+const hasData = computed(() => rows.value.length > 0);
 
 const progress = computed(() => {
   const percent = geocodeState.total
@@ -165,7 +185,6 @@ const progress = computed(() => {
 });
 
 const mapReady = computed(() => Boolean(mapInstance));
-const storedMapKey = "mapbox_api_key";
 
 const resetProgress = () => {
   geocodeState.total = 0;
@@ -195,7 +214,12 @@ const loadFile = (file) => {
       return record;
     });
     rows.value = bodyRows;
-    columnName.value = headers.value[0] || "";
+    const savedColumn = localStorage.getItem(storageKeys.columnName);
+    if (savedColumn && headers.value.includes(savedColumn)) {
+      columnName.value = savedColumn;
+    } else {
+      columnName.value = headers.value[0] || "";
+    }
     logs.value = [];
     points.value = [];
     cache.clear();
@@ -378,7 +402,7 @@ const downloadExcel = () => {
 
 const applyMapKey = () => {
   if (!mapApiKey.value) return;
-  localStorage.setItem(storedMapKey, mapApiKey.value);
+  localStorage.setItem(storageKeys.mapboxMap, mapApiKey.value);
   initMap();
 };
 
@@ -420,12 +444,43 @@ const refreshMarkers = () => {
 };
 
 onMounted(() => {
-  const savedKey = localStorage.getItem(storedMapKey);
+  const savedProvider = localStorage.getItem(storageKeys.provider);
+  if (savedProvider === "mapbox" || savedProvider === "here") {
+    provider.value = savedProvider;
+  }
+  const savedProviderKey = localStorage.getItem(getProviderStorageKey(provider.value));
+  if (savedProviderKey) {
+    providerApiKey.value = savedProviderKey;
+  }
+  const savedKey = localStorage.getItem(storageKeys.mapboxMap);
   if (savedKey) {
     mapApiKey.value = savedKey;
   }
   if (mapApiKey.value) {
     initMap();
+  }
+});
+
+watch(provider, (value) => {
+  localStorage.setItem(storageKeys.provider, value);
+  const savedKey = localStorage.getItem(getProviderStorageKey(value));
+  providerApiKey.value = savedKey || "";
+});
+
+watch(providerApiKey, (value) => {
+  const key = getProviderStorageKey(provider.value);
+  if (value) {
+    localStorage.setItem(key, value);
+  } else {
+    localStorage.removeItem(key);
+  }
+});
+
+watch(columnName, (value) => {
+  if (value) {
+    localStorage.setItem(storageKeys.columnName, value);
+  } else {
+    localStorage.removeItem(storageKeys.columnName);
   }
 });
 </script>
