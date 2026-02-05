@@ -1,13 +1,7 @@
 <template>
   <div class="app-shell">
     <header class="app-header">
-      <div>
-        <p class="eyebrow">批量地理编码工具</p>
-        <h1>Excel 地址批量转经纬度</h1>
-        <p class="subtext">
-          上传 Excel、指定地址列并选择地图服务商，自动追加经纬度到表格末尾列。
-        </p>
-      </div>
+      <h1>Excel 地址批量转经纬度</h1>
     </header>
 
     <main class="layout">
