@@ -93,7 +93,7 @@
       <section class="map-panel">
         <div class="map-wrapper">
           <div ref="mapContainer" class="map"></div>
-          <div class="map-config">
+          <div v-if="!mapLoaded" class="map-config">
             <h3>地图配置</h3>
             <label>
               <span>Mapbox API Key</span>
@@ -101,7 +101,7 @@
             </label>
             <button class="secondary" @click="applyMapKey">应用</button>
           </div>
-          <div v-if="!mapReady" class="map-empty">
+          <div v-if="!mapLoaded" class="map-empty">
             <p>请在右下角填写 Mapbox API Key 以加载地图。</p>
           </div>
         </div>
@@ -125,6 +125,7 @@ const mapApiKey = ref("");
 const logs = ref([]);
 const cache = new Map();
 const mapContainer = ref(null);
+const mapLoaded = ref(false);
 const geocodeState = reactive({
   total: 0,
   processed: 0,
@@ -160,6 +161,7 @@ const progress = computed(() => {
 });
 
 const mapReady = computed(() => Boolean(mapInstance));
+const storedMapKey = "mapbox_api_key";
 
 const resetProgress = () => {
   geocodeState.total = 0;
@@ -354,12 +356,14 @@ const downloadExcel = () => {
 
 const applyMapKey = () => {
   if (!mapApiKey.value) return;
+  localStorage.setItem(storedMapKey, mapApiKey.value);
   initMap();
 };
 
 const initMap = () => {
   if (!mapContainer.value || !mapApiKey.value) return;
   mapboxgl.accessToken = mapApiKey.value;
+  mapLoaded.value = false;
   if (mapInstance) {
     mapInstance.remove();
     mapInstance = null;
@@ -371,7 +375,10 @@ const initMap = () => {
     zoom: 3,
   });
   mapInstance.addControl(new mapboxgl.NavigationControl(), "top-right");
-  mapInstance.on("load", refreshMarkers);
+  mapInstance.on("load", () => {
+    mapLoaded.value = true;
+    refreshMarkers();
+  });
 };
 
 const refreshMarkers = () => {
@@ -391,6 +398,10 @@ const refreshMarkers = () => {
 };
 
 onMounted(() => {
+  const savedKey = localStorage.getItem(storedMapKey);
+  if (savedKey) {
+    mapApiKey.value = savedKey;
+  }
   if (mapApiKey.value) {
     initMap();
   }
