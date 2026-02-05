@@ -8,15 +8,24 @@
           上传 Excel、指定地址列并选择地图服务商，自动追加经纬度到表格末尾列。
         </p>
       </div>
-      <button class="ghost" @click="fillMockData">一键填写 Mock 数据</button>
     </header>
 
     <main class="layout">
       <section class="panel">
         <div class="card">
           <h2>1. 上传 Excel</h2>
-          <input type="file" accept=".xlsx,.xls" @change="handleFileChange" />
+          <div
+            class="dropzone"
+            :class="{ active: isDragging }"
+            @dragover.prevent="handleDragOver"
+            @dragleave.prevent="handleDragLeave"
+            @drop.prevent="handleFileDrop"
+          >
+            <input type="file" accept=".xlsx,.xls" @change="handleFileChange" />
+            <p>拖放 Excel 文件到此处，或点击选择</p>
+          </div>
           <p v-if="fileName" class="hint">已加载：{{ fileName }}</p>
+          <button class="ghost" @click="fillMockData">一键填写 Mock 数据</button>
         </div>
 
         <div class="card">
@@ -126,6 +135,7 @@ const logs = ref([]);
 const cache = new Map();
 const mapContainer = ref(null);
 const mapLoaded = ref(false);
+const isDragging = ref(false);
 const geocodeState = reactive({
   total: 0,
   processed: 0,
@@ -170,8 +180,7 @@ const resetProgress = () => {
   geocodeState.running = false;
 };
 
-const handleFileChange = (event) => {
-  const file = event.target.files?.[0];
+const loadFile = (file) => {
   if (!file) return;
   fileName.value = file.name;
 
@@ -199,6 +208,25 @@ const handleFileChange = (event) => {
     resetProgress();
   };
   reader.readAsArrayBuffer(file);
+};
+
+const handleFileChange = (event) => {
+  const file = event.target.files?.[0];
+  loadFile(file);
+};
+
+const handleDragOver = () => {
+  isDragging.value = true;
+};
+
+const handleDragLeave = () => {
+  isDragging.value = false;
+};
+
+const handleFileDrop = (event) => {
+  const file = event.dataTransfer?.files?.[0];
+  isDragging.value = false;
+  loadFile(file);
 };
 
 const fillMockData = () => {
