@@ -172,9 +172,10 @@
             <select v-model="provider">
               <option value="mapbox">Mapbox</option>
               <option value="here">HERE</option>
-              <option value="custom">自定义接口</option>
+              <option value="custom" :disabled="mode === 'reverse'">自定义接口</option>
             </select>
           </label>
+          <p v-if="mode === 'reverse'" class="hint">自定义接口暂不支持反编码。</p>
           <template v-if="provider === 'custom'">
             <label class="field">
               <span>App ID</span>
@@ -716,13 +717,22 @@ const startCustomGeocode = () => {
       if (payload.success) {
         const lat = payload.lat;
         const lng = payload.lng;
-        geocodeCache.set(address, { success: true, lat, lng });
-        const indices = addressMap.get(address) || [];
-        indices.forEach((rowIndex) => {
-          rows.value[rowIndex].纬度 = lat;
-          rows.value[rowIndex].经度 = lng;
-        });
-        points.value.push({ lat, lng });
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          geocodeCache.set(address, { success: true, lat, lng });
+          const indices = addressMap.get(address) || [];
+          indices.forEach((rowIndex) => {
+            rows.value[rowIndex].纬度 = lat;
+            rows.value[rowIndex].经度 = lng;
+          });
+          points.value.push({ lat, lng });
+        } else {
+          logs.value.push({
+            address,
+            type: "no_result",
+            request: payload.request || "custom",
+            response: "未返回可用经纬度",
+          });
+        }
       } else {
         logs.value.push({
           address,
@@ -1051,9 +1061,17 @@ const geocodeAddress = async (address) => {
           response: JSON.stringify(body),
         };
       }
-    const [lng, lat] = body.features[0].center;
-    return { success: true, lat, lng };
-  } catch (error) {
+      const [lng, lat] = body.features[0].center || [];
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return {
+          success: false,
+          type: "no_result",
+          request: url,
+          response: JSON.stringify(body),
+        };
+      }
+      return { success: true, lat, lng };
+    } catch (error) {
       return {
         success: false,
         type: "network_error",
@@ -1083,7 +1101,15 @@ const geocodeAddress = async (address) => {
         response: JSON.stringify(body),
       };
     }
-    const { lat, lng } = body.items[0].position;
+    const { lat, lng } = body.items[0].position || {};
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return {
+        success: false,
+        type: "no_result",
+        request: url,
+        response: JSON.stringify(body),
+      };
+    }
     return { success: true, lat, lng };
   } catch (error) {
     return {
@@ -1690,6 +1716,9 @@ watch(endColumnName, (value) => {
 
 watch(mode, (value) => {
   localStorage.setItem(storageKeys.mode, value);
+  if (value === "reverse" && provider.value === "custom") {
+    provider.value = "mapbox";
+  }
   resetResults();
 });
 </script>
