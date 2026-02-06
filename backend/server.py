@@ -60,6 +60,50 @@ async def geocode_address(session, token, config, address):
         return {"success": True, "lat": lat, "lng": lng}
 
 
+async def fetch_route(session, token, config, origin, destination):
+    route_url = config.get("routeUrl")
+    if not route_url:
+        return {
+            "success": False,
+            "errorType": "config_error",
+            "request": "routeUrl",
+            "response": "缺少导航接口地址",
+        }
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = token
+    payload = {
+        "origin": origin,
+        "destination": destination,
+        "language": "zh",
+        "coordType": "gcj02ll",
+        "countryArea": "china",
+    }
+    async with session.post(route_url, json=payload, headers=headers, ssl=False) as response:
+        data = await response.json()
+        if response.status != 200:
+            return {
+                "success": False,
+                "errorType": "network_error",
+                "request": route_url,
+                "response": json.dumps(data, ensure_ascii=False),
+            }
+        distance_value = (data.get("distance") or {}).get("value")
+        duration_value = (data.get("duration") or {}).get("value")
+        if distance_value is None or duration_value is None:
+            return {
+                "success": False,
+                "errorType": "no_result",
+                "request": route_url,
+                "response": json.dumps(data, ensure_ascii=False),
+            }
+        return {
+            "success": True,
+            "distanceKm": round(distance_value / 1000, 2),
+            "durationMin": round(duration_value / 60),
+        }
+
+
 async def handle_connection(websocket):
     print("client connected:", websocket.remote_address)
     async for message in websocket:
@@ -85,12 +129,17 @@ async def handle_connection(websocket):
         if payload.get("type") != "start":
             continue
 
-        config = payload.get("payload", {}).get("config", {})
-        addresses = payload.get("payload", {}).get("addresses", [])
+        payload_data = payload.get("payload", {})
+        mode = payload_data.get("mode", "geocode")
+        config = payload_data.get("config", {})
+        addresses = payload_data.get("addresses", [])
+        routes = payload_data.get("routes", [])
         async with aiohttp.ClientSession() as session:
             token = await fetch_token(session, config)
             if not token:
-                for index, address in enumerate(addresses, start=1):
+                items = routes if mode == "route" else addresses
+                for index, item in enumerate(items, start=1):
+                    address = item.get("origin") if mode == "route" else item
                     await websocket.send(
                         json.dumps(
                             {
@@ -102,6 +151,7 @@ async def handle_connection(websocket):
                                     "errorType": "auth_error",
                                     "request": config.get("tokenUrl", "token"),
                                     "response": "无法获取 Token",
+                                    "index": index - 1,
                                 },
                             }
                         )
@@ -109,26 +159,50 @@ async def handle_connection(websocket):
                 await websocket.send(json.dumps({"type": "complete"}))
                 continue
 
-            for index, address in enumerate(addresses, start=1):
-                result = await geocode_address(session, token, config, address)
-                await websocket.send(
-                    json.dumps(
-                        {
-                            "type": "progress",
-                            "payload": {
-                                "address": address,
-                                "processed": index,
-                                "success": result.get("success"),
-                                "lat": result.get("lat"),
-                                "lng": result.get("lng"),
-                                "errorType": result.get("errorType"),
-                                "request": result.get("request"),
-                                "response": result.get("response"),
-                            },
-                        },
-                        ensure_ascii=False,
+            if mode == "route":
+                for index, route in enumerate(routes, start=1):
+                    result = await fetch_route(
+                        session, token, config, route.get("origin"), route.get("destination")
                     )
-                )
+                    await websocket.send(
+                        json.dumps(
+                            {
+                                "type": "progress",
+                                "payload": {
+                                    "processed": index,
+                                    "success": result.get("success"),
+                                    "distanceKm": result.get("distanceKm"),
+                                    "durationMin": result.get("durationMin"),
+                                    "errorType": result.get("errorType"),
+                                    "request": result.get("request"),
+                                    "response": result.get("response"),
+                                    "index": index - 1,
+                                },
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
+            else:
+                for index, address in enumerate(addresses, start=1):
+                    result = await geocode_address(session, token, config, address)
+                    await websocket.send(
+                        json.dumps(
+                            {
+                                "type": "progress",
+                                "payload": {
+                                    "address": address,
+                                    "processed": index,
+                                    "success": result.get("success"),
+                                    "lat": result.get("lat"),
+                                    "lng": result.get("lng"),
+                                    "errorType": result.get("errorType"),
+                                    "request": result.get("request"),
+                                    "response": result.get("response"),
+                                },
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
 
         await websocket.send(json.dumps({"type": "complete"}))
 
