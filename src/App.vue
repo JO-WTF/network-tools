@@ -1848,6 +1848,7 @@ const refreshMarkers = () => {
       .setLngLat([point.lng, point.lat])
       .addTo(mapInstance);
     const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 12 })
+      .setLngLat([point.lng, point.lat])
       .setHTML(buildPointPopupContent(point));
     const markerElement = marker.getElement();
     markerElement.addEventListener("mouseenter", () => {
