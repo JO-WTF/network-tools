@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel">
+  <div class="card">
+    <h2>3. 处理完成</h2>
+    <div class="summary">
+      <div>
+        <span>处理模式</span>
+        <strong>{{ summary.mode }}</strong>
+      </div>
+      <div>
+        <span>服务商</span>
+        <strong>{{ summary.provider }}</strong>
+      </div>
+      <div>
+        <span>总行数</span>
+        <strong>{{ summary.row_count }}</strong>
+      </div>
+      <div>
+        <span>错误数量</span>
+        <strong>{{ summary.error_count }}</strong>
+      </div>
+    </div>
+    <div class="actions">
+      <a class="primary" href="{{ url_for('download_result', token=token) }}">下载结果</a>
+      <a class="secondary" href="{{ url_for('index') }}">继续处理</a>
+    </div>
+  </div>
+  <div class="card">
+    <h2>错误日志</h2>
+    {% if logs %}
+      <div class="log">
+        {% for item in logs %}
+          <div class="log-item">
+            <div class="log-title">
+              <strong>{{ item.address }}</strong>
+              <span class="tag">{{ item.type }}</span>
+            </div>
+            <div class="log-body">
+              <p><span>请求</span> {{ item.request }}</p>
+              <p><span>返回</span> {{ item.response }}</p>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="hint">暂无错误日志。</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

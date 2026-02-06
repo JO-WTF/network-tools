@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel">
+  <div class="card">
+    <h2>2. 配置解析</h2>
+    <form action="{{ url_for('process_excel') }}" method="post" class="config-form">
+      <input type="hidden" name="token" value="{{ token }}" />
+
+      <label class="field">
+        <span>处理方式</span>
+        <select name="mode" id="mode">
+          <option value="geocode">地址编码</option>
+          <option value="reverse">经纬度解码</option>
+          <option value="route">导航距离计算</option>
+        </select>
+      </label>
+
+      <div id="geocode-fields">
+        <label class="field">
+          <span>地址列名</span>
+          <select name="address_column">
+            {% for header in headers %}
+              <option value="{{ header }}">{{ header }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+
+      <div id="reverse-fields" class="hidden">
+        <label class="field">
+          <span>经纬度格式</span>
+          <select name="reverse_column_mode" id="reverse-column-mode">
+            <option value="separate">不同列</option>
+            <option value="single">同一列</option>
+          </select>
+        </label>
+        <div id="reverse-separate">
+          <label class="field">
+            <span>纬度列名</span>
+            <select name="lat_column">
+              {% for header in headers %}
+                <option value="{{ header }}">{{ header }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="field">
+            <span>经度列名</span>
+            <select name="lng_column">
+              {% for header in headers %}
+                <option value="{{ header }}">{{ header }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </div>
+        <div id="reverse-single" class="hidden">
+          <label class="field">
+            <span>经纬度列名</span>
+            <select name="reverse_column">
+              {% for header in headers %}
+                <option value="{{ header }}">{{ header }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="field">
+            <span>分隔符模式</span>
+            <select name="reverse_delimiter_mode" id="reverse-delimiter-mode">
+              <option value="auto">自动识别</option>
+              <option value="custom">自定义</option>
+            </select>
+          </label>
+          <label class="field hidden" id="reverse-delimiter-field">
+            <span>分隔符</span>
+            <input type="text" name="reverse_delimiter" placeholder=", 或 空格" />
+          </label>
+        </div>
+      </div>
+
+      <div id="route-fields" class="hidden">
+        <label class="field">
+          <span>起点列名</span>
+          <select name="start_column">
+            {% for header in headers %}
+              <option value="{{ header }}">{{ header }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>终点列名</span>
+          <select name="end_column">
+            {% for header in headers %}
+              <option value="{{ header }}">{{ header }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+
+      <label class="field">
+        <span>地图服务商</span>
+        <select name="provider" id="provider">
+          <option value="mapbox">Mapbox</option>
+          <option value="here">HERE</option>
+          <option value="custom">自定义接口</option>
+        </select>
+      </label>
+
+      <div id="provider-key-field">
+        <label class="field">
+          <span>API Key</span>
+          <input type="password" name="provider_api_key" placeholder="输入服务商 API Key" />
+        </label>
+      </div>
+
+      <div id="custom-fields" class="hidden">
+        <label class="field">
+          <span>App ID</span>
+          <input type="text" name="custom_app_id" placeholder="输入 App ID" />
+        </label>
+        <label class="field">
+          <span>Credential</span>
+          <input type="password" name="custom_credential" placeholder="输入 Credential" />
+        </label>
+        <label class="field">
+          <span>Token 接口 URL</span>
+          <input type="text" name="custom_token_url" placeholder="getResAppDynamicToken 接口地址" />
+        </label>
+        <label class="field">
+          <span>地理编码接口 URL</span>
+          <input type="text" name="custom_geocode_url" placeholder="geographicSearch 接口地址" />
+        </label>
+      </div>
+
+      <div class="actions">
+        <button type="submit" class="primary">开始处理</button>
+        <a class="secondary" href="{{ url_for('index') }}">重新上传</a>
+      </div>
+    </form>
+  </div>
+</section>
+
+<script>
+  const modeSelect = document.getElementById('mode');
+  const providerSelect = document.getElementById('provider');
+  const reverseModeSelect = document.getElementById('reverse-column-mode');
+  const reverseDelimiterModeSelect = document.getElementById('reverse-delimiter-mode');
+  const geocodeFields = document.getElementById('geocode-fields');
+  const reverseFields = document.getElementById('reverse-fields');
+  const reverseSeparate = document.getElementById('reverse-separate');
+  const reverseSingle = document.getElementById('reverse-single');
+  const routeFields = document.getElementById('route-fields');
+  const customFields = document.getElementById('custom-fields');
+  const providerKeyField = document.getElementById('provider-key-field');
+  const reverseDelimiterField = document.getElementById('reverse-delimiter-field');
+
+  const toggleMode = () => {
+    const mode = modeSelect.value;
+    geocodeFields.classList.toggle('hidden', mode !== 'geocode');
+    reverseFields.classList.toggle('hidden', mode !== 'reverse');
+    routeFields.classList.toggle('hidden', mode !== 'route');
+  };
+
+  const toggleReverseMode = () => {
+    const isSingle = reverseModeSelect.value === 'single';
+    reverseSeparate.classList.toggle('hidden', isSingle);
+    reverseSingle.classList.toggle('hidden', !isSingle);
+  };
+
+  const toggleDelimiter = () => {
+    const isCustom = reverseDelimiterModeSelect.value === 'custom';
+    reverseDelimiterField.classList.toggle('hidden', !isCustom);
+  };
+
+  const toggleProvider = () => {
+    const isCustom = providerSelect.value === 'custom';
+    customFields.classList.toggle('hidden', !isCustom);
+    providerKeyField.classList.toggle('hidden', isCustom);
+  };
+
+  modeSelect.addEventListener('change', toggleMode);
+  reverseModeSelect.addEventListener('change', toggleReverseMode);
+  reverseDelimiterModeSelect.addEventListener('change', toggleDelimiter);
+  providerSelect.addEventListener('change', toggleProvider);
+
+  toggleMode();
+  toggleReverseMode();
+  toggleDelimiter();
+  toggleProvider();
+</script>
+{% endblock %}
