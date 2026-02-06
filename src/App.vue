@@ -322,6 +322,22 @@
               <input v-model="mapApiKey" type="password" placeholder="用于地图展示" />
             </label>
           </div>
+          <div class="settings-section">
+            <h3>配置文件</h3>
+            <div class="actions settings-actions">
+              <button class="secondary" type="button" @click="exportSettings">导出配置</button>
+              <button class="secondary" type="button" @click="triggerConfigImport">导入配置</button>
+              <input
+                ref="configFileInput"
+                class="visually-hidden"
+                type="file"
+                accept="application/json"
+                @change="handleConfigFileChange"
+              />
+            </div>
+            <p v-if="settingsNotice" class="hint settings-notice">{{ settingsNotice }}</p>
+            <p class="hint">仅导入/导出设置中的密钥、URL 等配置项。</p>
+          </div>
         </div>
       </div>
     </div>
@@ -366,6 +382,8 @@ const customSocket = ref(null);
 const mapApiKey = ref("");
 const logs = ref([]);
 const showSettings = ref(false);
+const settingsNotice = ref("");
+const configFileInput = ref(null);
 const geocodeCache = new Map();
 const reverseCache = new Map();
 const routeCache = new Map();
@@ -1816,6 +1834,91 @@ const updateRouteLayer = () => {
         "line-width": 4,
       },
     });
+  }
+};
+
+const exportSettings = () => {
+  const payload = {
+    version: 1,
+    data: {
+      mapboxGeocodeApiKey: mapboxGeocodeApiKey.value,
+      hereGeocodeApiKey: hereGeocodeApiKey.value,
+      customAppId: customAppId.value,
+      customCredential: customCredential.value,
+      customTokenUrl: customTokenUrl.value,
+      customGeocodeUrl: customGeocodeUrl.value,
+      customRouteUrl: customRouteUrl.value,
+      customWebSocketUrl: customWebSocketUrl.value,
+      mapApiKey: mapApiKey.value,
+    },
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "network-tools-config.json";
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+};
+
+const triggerConfigImport = () => {
+  settingsNotice.value = "";
+  configFileInput.value?.click();
+};
+
+const applyConfigValue = (value, setter) => {
+  if (typeof value === "string") {
+    setter(value);
+  }
+};
+
+const handleConfigFileChange = async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  settingsNotice.value = "";
+  try {
+    const content = await file.text();
+    const parsed = JSON.parse(content);
+    const config = parsed?.data && typeof parsed.data === "object" ? parsed.data : parsed;
+    if (!config || typeof config !== "object") {
+      throw new Error("配置格式不正确");
+    }
+    applyConfigValue(config.mapboxGeocodeApiKey, (value) => {
+      mapboxGeocodeApiKey.value = value;
+    });
+    applyConfigValue(config.hereGeocodeApiKey, (value) => {
+      hereGeocodeApiKey.value = value;
+    });
+    applyConfigValue(config.customAppId, (value) => {
+      customAppId.value = value;
+    });
+    applyConfigValue(config.customCredential, (value) => {
+      customCredential.value = value;
+    });
+    applyConfigValue(config.customTokenUrl, (value) => {
+      customTokenUrl.value = value;
+    });
+    applyConfigValue(config.customGeocodeUrl, (value) => {
+      customGeocodeUrl.value = value;
+    });
+    applyConfigValue(config.customRouteUrl, (value) => {
+      customRouteUrl.value = value;
+    });
+    applyConfigValue(config.customWebSocketUrl, (value) => {
+      customWebSocketUrl.value = value;
+    });
+    applyConfigValue(config.mapApiKey, (value) => {
+      mapApiKey.value = value;
+      localStorage.setItem(storageKeys.mapboxMap, value);
+      initMap();
+    });
+    settingsNotice.value = `配置已导入：${file.name}`;
+  } catch (error) {
+    settingsNotice.value = `导入失败：${error.message || "配置解析异常"}`;
+  } finally {
+    event.target.value = "";
   }
 };
 
