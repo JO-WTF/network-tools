@@ -290,6 +290,8 @@ const customCredential = ref("");
 const customTokenUrl = ref("");
 const customGeocodeUrl = ref("");
 const customToken = ref("");
+const customWebSocketUrl = "ws://localhost:8765";
+const customSocket = ref(null);
 const mapApiKey = ref("");
 const logs = ref([]);
 const geocodeCache = new Map();
@@ -429,6 +431,7 @@ const resetResults = () => {
   geocodeCache.clear();
   reverseCache.clear();
   routeCache.clear();
+  closeCustomSocket();
   resetProgress();
   refreshMarkers();
 };
@@ -616,6 +619,134 @@ const buildAddressMap = () => {
     addressMap.get(address).push(index);
   });
   return addressMap;
+};
+
+const closeCustomSocket = () => {
+  if (customSocket.value) {
+    customSocket.value.close();
+    customSocket.value = null;
+  }
+};
+
+const startCustomGeocode = () => {
+  if (!canStart.value) return;
+  closeCustomSocket();
+  logs.value = [];
+  points.value = [];
+  routeLine.value = null;
+  geocodeState.running = true;
+  geocodeState.processed = 0;
+  geocodeState.current = "";
+
+  const addressMap = buildAddressMap();
+  const addresses = Array.from(addressMap.keys());
+  geocodeState.total = addresses.length;
+  if (addresses.length === 0) {
+    geocodeState.running = false;
+    return;
+  }
+
+  let socket;
+  try {
+    socket = new WebSocket(customWebSocketUrl);
+  } catch (error) {
+    logs.value.push({
+      address: "-",
+      type: "network_error",
+      request: customWebSocketUrl,
+      response: `无法连接 WebSocket: ${String(error)}`,
+    });
+    geocodeState.running = false;
+    return;
+  }
+
+  customSocket.value = socket;
+
+  socket.onopen = () => {
+    socket.send(
+      JSON.stringify({
+        type: "start",
+        payload: {
+          config: {
+            appId: customAppId.value,
+            credential: customCredential.value,
+            tokenUrl: customTokenUrl.value,
+            geocodeUrl: customGeocodeUrl.value,
+          },
+          addresses,
+        },
+      })
+    );
+  };
+
+  socket.onmessage = (event) => {
+    let message;
+    try {
+      message = JSON.parse(event.data);
+    } catch (error) {
+      logs.value.push({
+        address: "-",
+        type: "parse_error",
+        request: "WebSocket",
+        response: `无法解析后端返回: ${String(error)}`,
+      });
+      return;
+    }
+
+    if (message.type === "progress") {
+      const payload = message.payload || {};
+      const address = payload.address || "-";
+      geocodeState.current = address;
+      if (Number.isFinite(payload.processed)) {
+        geocodeState.processed = payload.processed;
+      } else {
+        geocodeState.processed += 1;
+      }
+      if (payload.success) {
+        const lat = payload.lat;
+        const lng = payload.lng;
+        geocodeCache.set(address, { success: true, lat, lng });
+        const indices = addressMap.get(address) || [];
+        indices.forEach((rowIndex) => {
+          rows.value[rowIndex].纬度 = lat;
+          rows.value[rowIndex].经度 = lng;
+        });
+        points.value.push({ lat, lng });
+      } else {
+        logs.value.push({
+          address,
+          type: payload.errorType || "network_error",
+          request: payload.request || "custom",
+          response: payload.response || "请求失败",
+        });
+      }
+    }
+
+    if (message.type === "complete") {
+      geocodeState.running = false;
+      geocodeState.current = "";
+      closeCustomSocket();
+      refreshMarkers();
+    }
+  };
+
+  socket.onerror = () => {
+    logs.value.push({
+      address: "-",
+      type: "network_error",
+      request: customWebSocketUrl,
+      response: "WebSocket 连接异常",
+    });
+  };
+
+  socket.onclose = () => {
+    if (geocodeState.running) {
+      geocodeState.running = false;
+      geocodeState.current = "";
+      refreshMarkers();
+    }
+    closeCustomSocket();
+  };
 };
 
 const startGeocode = async () => {
@@ -826,7 +957,11 @@ const handleStart = () => {
   } else if (mode.value === "route") {
     startRoute();
   } else {
-    startGeocode();
+    if (provider.value === "custom") {
+      startCustomGeocode();
+    } else {
+      startGeocode();
+    }
   }
 };
 
