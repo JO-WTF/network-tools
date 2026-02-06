@@ -1254,12 +1254,14 @@ const startRoute = async () => {
             lng: parsedOrigin.lng,
             type: "origin",
             label: "起点",
+            displayMode: "coordinate-only",
           },
           {
             lat: parsedDestination.lat,
             lng: parsedDestination.lng,
             type: "destination",
             label: "终点",
+            displayMode: "coordinate-only",
           }
         );
         routeLine.value = result.line;
@@ -1314,6 +1316,7 @@ const startRoute = async () => {
           type: "origin",
           label: "起点",
           address: origin,
+          displayMode: "full",
         },
         {
           lat: result.destination.lat,
@@ -1321,6 +1324,7 @@ const startRoute = async () => {
           type: "destination",
           label: "终点",
           address: destination,
+          displayMode: "full",
         }
       );
       routeLine.value = result.line;
@@ -1946,6 +1950,13 @@ const formatCoordinate = (value) => {
 };
 
 const buildPointPopupContent = (point) => {
+  if (point.displayMode === "coordinate-only") {
+    return `
+      <div class="map-popup">
+        <p><strong>经纬度：</strong>${formatCoordinate(point.lat)}, ${formatCoordinate(point.lng)}</p>
+      </div>
+    `;
+  }
   const title = point.label || point.address || "位置点";
   const addressLine = point.address ? `<p><strong>地址：</strong>${point.address}</p>` : "";
   const adminParts = [point.admin1, point.admin2, point.admin3].filter(Boolean);
