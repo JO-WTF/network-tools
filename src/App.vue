@@ -26,7 +26,13 @@
         <div class="card">
           <div class="card-header">
             <h2>1. 上传 Excel</h2>
-            <button class="icon-button" type="button" @click="fillMockData" aria-label="一键填写 Mock 数据">
+            <button
+              class="icon-button"
+              :class="{ pulse: mockAnimating }"
+              type="button"
+              @click="fillMockData"
+              aria-label="一键填写 Mock 数据"
+            >
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path
                   d="M12 3l1.9 4.3L18 9.2l-4.1 1.9L12 15l-1.9-3.9L6 9.2l4.1-1.9L12 3zm7 9l.9 2.1L22 15l-2.1.9L19 18l-.9-2.1L16 15l2.1-.9L19 12zM4 13l.9 2.1L7 16l-2.1.9L4 19l-.9-2.1L1 16l2.1-.9L4 13z"
@@ -36,7 +42,7 @@
           </div>
           <div
             class="dropzone"
-            :class="{ active: isDragging, loaded: hasData }"
+            :class="{ active: isDragging, loaded: hasData, flash: dropzoneFlash }"
             @dragover.prevent="handleDragOver"
             @dragleave.prevent="handleDragLeave"
             @drop.prevent="handleFileDrop"
@@ -61,24 +67,85 @@
             </label>
           </div>
           <div v-else-if="mode === 'reverse'">
-            <label class="field">
-              <span>纬度列名</span>
-              <select v-model="latColumnName">
-                <option value="" disabled>请选择列名</option>
-                <option v-for="header in headers" :key="header" :value="header">
-                  {{ header }}
-                </option>
-              </select>
-            </label>
-            <label class="field">
-              <span>经度列名</span>
-              <select v-model="lngColumnName">
-                <option value="" disabled>请选择列名</option>
-                <option v-for="header in headers" :key="header" :value="header">
-                  {{ header }}
-                </option>
-              </select>
-            </label>
+            <div class="field">
+              <span>经纬度格式</span>
+              <div class="option-row">
+                <label class="option-pill">
+                  <input
+                    v-model="reverseColumnMode"
+                    type="radio"
+                    value="separate"
+                  />
+                  <span>不同列</span>
+                </label>
+                <label class="option-pill">
+                  <input
+                    v-model="reverseColumnMode"
+                    type="radio"
+                    value="single"
+                  />
+                  <span>同一列</span>
+                </label>
+              </div>
+            </div>
+            <template v-if="reverseColumnMode === 'separate'">
+              <label class="field">
+                <span>纬度列名</span>
+                <select v-model="latColumnName">
+                  <option value="" disabled>请选择列名</option>
+                  <option v-for="header in headers" :key="header" :value="header">
+                    {{ header }}
+                  </option>
+                </select>
+              </label>
+              <label class="field">
+                <span>经度列名</span>
+                <select v-model="lngColumnName">
+                  <option value="" disabled>请选择列名</option>
+                  <option v-for="header in headers" :key="header" :value="header">
+                    {{ header }}
+                  </option>
+                </select>
+              </label>
+            </template>
+            <template v-else>
+              <label class="field">
+                <span>经纬度列名</span>
+                <select v-model="reverseColumnName">
+                  <option value="" disabled>请选择列名</option>
+                  <option v-for="header in headers" :key="header" :value="header">
+                    {{ header }}
+                  </option>
+                </select>
+              </label>
+              <div class="field">
+                <span>分隔符</span>
+                <div class="option-row">
+                  <label class="option-pill">
+                    <input
+                      v-model="reverseDelimiterMode"
+                      type="radio"
+                      value="auto"
+                    />
+                    <span>自动识别 “,”</span>
+                  </label>
+                  <label class="option-pill">
+                    <input
+                      v-model="reverseDelimiterMode"
+                      type="radio"
+                      value="custom"
+                    />
+                    <span>自定义</span>
+                  </label>
+                </div>
+                <input
+                  v-if="reverseDelimiterMode === 'custom'"
+                  v-model="reverseDelimiter"
+                  type="text"
+                  placeholder="例如：| 或 空格"
+                />
+              </div>
+            </template>
           </div>
           <div v-else>
             <label class="field">
@@ -191,6 +258,10 @@ const fileName = ref("");
 const columnName = ref("");
 const latColumnName = ref("");
 const lngColumnName = ref("");
+const reverseColumnMode = ref("separate");
+const reverseColumnName = ref("");
+const reverseDelimiterMode = ref("auto");
+const reverseDelimiter = ref(",");
 const startColumnName = ref("");
 const endColumnName = ref("");
 const provider = ref("mapbox");
@@ -203,6 +274,8 @@ const routeCache = new Map();
 const mapContainer = ref(null);
 const mapLoaded = ref(false);
 const isDragging = ref(false);
+const dropzoneFlash = ref(false);
+const mockAnimating = ref(false);
 const geocodeState = reactive({
   total: 0,
   processed: 0,
@@ -230,6 +303,10 @@ const storageKeys = {
   columnName: "geocode_column_name",
   latColumnName: "reverse_lat_column_name",
   lngColumnName: "reverse_lng_column_name",
+  reverseColumnMode: "reverse_column_mode",
+  reverseColumnName: "reverse_column_name",
+  reverseDelimiterMode: "reverse_delimiter_mode",
+  reverseDelimiter: "reverse_delimiter",
   startColumnName: "route_start_column_name",
   endColumnName: "route_end_column_name",
   mode: "geocode_mode",
@@ -246,6 +323,12 @@ const canStart = computed(() => {
     return Boolean(columnName.value);
   }
   if (mode.value === "reverse") {
+    if (reverseColumnMode.value === "single") {
+      return Boolean(
+        reverseColumnName.value &&
+          (reverseDelimiterMode.value === "auto" || reverseDelimiter.value)
+      );
+    }
     return Boolean(latColumnName.value && lngColumnName.value);
   }
   return (
@@ -310,6 +393,7 @@ const resetResults = () => {
 const loadFile = (file) => {
   if (!file) return;
   fileName.value = file.name;
+  triggerDropzoneFlash();
 
   const reader = new FileReader();
   reader.onload = (e) => {
@@ -345,6 +429,20 @@ const loadFile = (file) => {
       lngColumnName.value = savedLngColumn;
     } else {
       lngColumnName.value = guessColumn(headers.value, ["经度", "lng", "lon"]);
+    }
+    const savedReverseColumn = localStorage.getItem(storageKeys.reverseColumnName);
+    if (savedReverseColumn && headers.value.includes(savedReverseColumn)) {
+      reverseColumnName.value = savedReverseColumn;
+    } else {
+      reverseColumnName.value = guessColumn(headers.value, ["坐标", "经纬度"]);
+    }
+    const savedReverseMode = localStorage.getItem(storageKeys.reverseColumnMode);
+    if (savedReverseMode === "single" || savedReverseMode === "separate") {
+      reverseColumnMode.value = savedReverseMode;
+    } else if (latColumnName.value && lngColumnName.value) {
+      reverseColumnMode.value = "separate";
+    } else if (reverseColumnName.value) {
+      reverseColumnMode.value = "single";
     }
     const savedStartColumn = localStorage.getItem(storageKeys.startColumnName);
     if (savedStartColumn && headers.value.includes(savedStartColumn)) {
@@ -383,18 +481,77 @@ const handleFileDrop = (event) => {
 };
 
 const fillMockData = () => {
-  headers.value = ["地址", "客户"];
-  rows.value = [
-    { 地址: "上海市浦东新区世纪大道100号", 客户: "星云科技" },
-    { 地址: "北京市朝阳区三里屯路11号", 客户: "联动创新" },
-    { 地址: "深圳市南山区科技园科苑路15号", 客户: "海风智能" },
-    { 地址: "杭州市西湖区文三路90号", 客户: "知行数据" },
-    { 地址: "成都市武侯区人民南路四段27号", 客户: "西蜀科技" },
-    { 地址: "上海市浦东新区世纪大道100号", 客户: "星云科技" }
-  ];
-  columnName.value = "地址";
+  triggerMockAnimation();
+  if (mode.value === "reverse") {
+    if (reverseColumnMode.value === "single") {
+      headers.value = ["经纬度", "客户"];
+      rows.value = [
+        { 经纬度: "31.2304,121.4737", 客户: "星云科技" },
+        { 经纬度: "39.9087,116.3974", 客户: "京华贸易" },
+        { 经纬度: "22.5431,114.0579", 客户: "海风智能" },
+        { 经纬度: "30.2741,120.1551", 客户: "知行数据" },
+        { 经纬度: "30.5728,104.0668", 客户: "西蜀科技" }
+      ];
+      reverseColumnName.value = "经纬度";
+      reverseDelimiterMode.value = "auto";
+    } else {
+      headers.value = ["纬度", "经度", "客户"];
+      rows.value = [
+        { 纬度: 31.2304, 经度: 121.4737, 客户: "星云科技" },
+        { 纬度: 39.9087, 经度: 116.3974, 客户: "京华贸易" },
+        { 纬度: 22.5431, 经度: 114.0579, 客户: "海风智能" },
+        { 纬度: 30.2741, 经度: 120.1551, 客户: "知行数据" },
+        { 纬度: 30.5728, 经度: 104.0668, 客户: "西蜀科技" }
+      ];
+      latColumnName.value = "纬度";
+      lngColumnName.value = "经度";
+    }
+  } else if (mode.value === "route") {
+    headers.value = ["起点", "终点", "客户"];
+    rows.value = [
+      { 起点: "上海虹桥站", 终点: "上海迪士尼", 客户: "星云科技" },
+      { 起点: "北京南站", 终点: "北京首都机场", 客户: "京华贸易" },
+      { 起点: "深圳北站", 终点: "深圳湾口岸", 客户: "海风智能" },
+      { 起点: "杭州东站", 终点: "西湖风景区", 客户: "知行数据" },
+      { 起点: "成都东站", 终点: "天府国际机场", 客户: "西蜀科技" }
+    ];
+    startColumnName.value = "起点";
+    endColumnName.value = "终点";
+  } else {
+    headers.value = ["地址", "客户"];
+    rows.value = [
+      { 地址: "上海市浦东新区世纪大道100号", 客户: "星云科技" },
+      { 地址: "北京市朝阳区三里屯路11号", 客户: "联动创新" },
+      { 地址: "深圳市南山区科技园科苑路15号", 客户: "海风智能" },
+      { 地址: "杭州市西湖区文三路90号", 客户: "知行数据" },
+      { 地址: "成都市武侯区人民南路四段27号", 客户: "西蜀科技" },
+      { 地址: "上海市浦东新区世纪大道100号", 客户: "星云科技" }
+    ];
+    columnName.value = "地址";
+  }
   fileName.value = "mock.xlsx";
   resetResults();
+  triggerDropzoneFlash();
+};
+
+const triggerDropzoneFlash = () => {
+  dropzoneFlash.value = false;
+  requestAnimationFrame(() => {
+    dropzoneFlash.value = true;
+    setTimeout(() => {
+      dropzoneFlash.value = false;
+    }, 600);
+  });
+};
+
+const triggerMockAnimation = () => {
+  mockAnimating.value = false;
+  requestAnimationFrame(() => {
+    mockAnimating.value = true;
+    setTimeout(() => {
+      mockAnimating.value = false;
+    }, 500);
+  });
 };
 
 const guessColumn = (headerList, keywords) => {
@@ -471,24 +628,23 @@ const startReverseGeocode = async () => {
   geocodeState.total = rows.value.length;
 
   for (const row of rows.value) {
-    const lat = Number(row[latColumnName.value]);
-    const lng = Number(row[lngColumnName.value]);
-    const key = `${lat},${lng}`;
-    geocodeState.current = key;
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    const parsed = parseReverseCoordinates(row);
+    geocodeState.current = parsed.key;
+    if (!parsed.success) {
       logs.value.push({
-        address: key,
+        address: parsed.key,
         type: "invalid",
         request: "输入格式错误",
-        response: "纬度或经度不是有效数字",
+        response: parsed.message,
       });
       geocodeState.processed += 1;
       continue;
     }
-    let result = reverseCache.get(key);
+    const { lat, lng } = parsed;
+    let result = reverseCache.get(parsed.key);
     if (!result) {
       result = await reverseGeocode(lat, lng);
-      reverseCache.set(key, result);
+      reverseCache.set(parsed.key, result);
     }
     geocodeState.processed += 1;
     if (result.success) {
@@ -499,7 +655,7 @@ const startReverseGeocode = async () => {
       points.value.push({ lat, lng, type: "point" });
     } else {
       logs.value.push({
-        address: key,
+        address: parsed.key,
         type: result.type,
         request: result.request,
         response: result.response,
@@ -510,6 +666,40 @@ const startReverseGeocode = async () => {
   geocodeState.running = false;
   geocodeState.current = "";
   refreshMarkers();
+};
+
+const parseReverseCoordinates = (row) => {
+  if (reverseColumnMode.value === "single") {
+    const raw = String(row[reverseColumnName.value] ?? "").trim();
+    if (!raw) {
+      return { success: false, key: "-", message: "经纬度为空" };
+    }
+    let delimiter = reverseDelimiter.value;
+    if (reverseDelimiterMode.value === "auto") {
+      delimiter = raw.includes(",") ? "," : raw.includes("，") ? "，" : "";
+    }
+    if (!delimiter) {
+      return { success: false, key: raw, message: "无法识别分隔符" };
+    }
+    const parts = raw.split(delimiter).map((item) => item.trim());
+    if (parts.length < 2) {
+      return { success: false, key: raw, message: "经纬度格式不完整" };
+    }
+    const lat = Number(parts[0]);
+    const lng = Number(parts[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return { success: false, key: raw, message: "纬度或经度不是有效数字" };
+    }
+    return { success: true, key: raw, lat, lng };
+  }
+
+  const lat = Number(row[latColumnName.value]);
+  const lng = Number(row[lngColumnName.value]);
+  const key = `${lat},${lng}`;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return { success: false, key, message: "纬度或经度不是有效数字" };
+  }
+  return { success: true, key, lat, lng };
 };
 
 const startRoute = async () => {
@@ -1047,6 +1237,22 @@ onMounted(() => {
   if (savedProviderKey) {
     providerApiKey.value = savedProviderKey;
   }
+  const savedReverseMode = localStorage.getItem(storageKeys.reverseColumnMode);
+  if (savedReverseMode === "single" || savedReverseMode === "separate") {
+    reverseColumnMode.value = savedReverseMode;
+  }
+  const savedReverseColumn = localStorage.getItem(storageKeys.reverseColumnName);
+  if (savedReverseColumn) {
+    reverseColumnName.value = savedReverseColumn;
+  }
+  const savedDelimiterMode = localStorage.getItem(storageKeys.reverseDelimiterMode);
+  if (savedDelimiterMode === "auto" || savedDelimiterMode === "custom") {
+    reverseDelimiterMode.value = savedDelimiterMode;
+  }
+  const savedDelimiter = localStorage.getItem(storageKeys.reverseDelimiter);
+  if (savedDelimiter) {
+    reverseDelimiter.value = savedDelimiter;
+  }
   const savedKey = localStorage.getItem(storageKeys.mapboxMap);
   if (savedKey) {
     mapApiKey.value = savedKey;
@@ -1092,6 +1298,38 @@ watch(lngColumnName, (value) => {
     localStorage.setItem(storageKeys.lngColumnName, value);
   } else {
     localStorage.removeItem(storageKeys.lngColumnName);
+  }
+});
+
+watch(reverseColumnMode, (value) => {
+  if (value) {
+    localStorage.setItem(storageKeys.reverseColumnMode, value);
+  } else {
+    localStorage.removeItem(storageKeys.reverseColumnMode);
+  }
+});
+
+watch(reverseColumnName, (value) => {
+  if (value) {
+    localStorage.setItem(storageKeys.reverseColumnName, value);
+  } else {
+    localStorage.removeItem(storageKeys.reverseColumnName);
+  }
+});
+
+watch(reverseDelimiterMode, (value) => {
+  if (value) {
+    localStorage.setItem(storageKeys.reverseDelimiterMode, value);
+  } else {
+    localStorage.removeItem(storageKeys.reverseDelimiterMode);
+  }
+});
+
+watch(reverseDelimiter, (value) => {
+  if (value) {
+    localStorage.setItem(storageKeys.reverseDelimiter, value);
+  } else {
+    localStorage.removeItem(storageKeys.reverseDelimiter);
   }
 });
 
