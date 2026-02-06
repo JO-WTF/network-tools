@@ -5,18 +5,32 @@
         <h1>{{ headerTitle }}</h1>
         <p class="sub-title">支持地址编码、经纬度解码、导航距离计算三种批量处理方式。</p>
       </div>
-      <div class="mode-toggle" role="tablist" aria-label="功能切换">
+      <div class="header-controls">
+        <div class="mode-toggle" role="tablist" aria-label="功能切换">
+          <button
+            v-for="item in modeOptions"
+            :key="item.value"
+            type="button"
+            class="mode-button"
+            :class="{ active: mode === item.value }"
+            role="tab"
+            :aria-selected="mode === item.value"
+            @click="mode = item.value"
+          >
+            {{ item.label }}
+          </button>
+        </div>
         <button
-          v-for="item in modeOptions"
-          :key="item.value"
+          class="icon-button settings-button"
           type="button"
-          class="mode-button"
-          :class="{ active: mode === item.value }"
-          role="tab"
-          :aria-selected="mode === item.value"
-          @click="mode = item.value"
+          @click="showSettings = true"
+          aria-label="打开设置"
         >
-          {{ item.label }}
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Zm8.94 3.5a7.2 7.2 0 0 0-.12-1.3l2.02-1.58-2-3.46-2.44.78a7.53 7.53 0 0 0-2.26-1.3l-.5-2.5h-4l-.5 2.5a7.53 7.53 0 0 0-2.26 1.3l-2.44-.78-2 3.46 2.02 1.58a7.2 7.2 0 0 0 0 2.6L2.44 13.6l2 3.46 2.44-.78a7.53 7.53 0 0 0 2.26 1.3l.5 2.5h4l.5-2.5a7.53 7.53 0 0 0 2.26-1.3l2.44.78 2-3.46-2.02-1.58c.08-.42.12-.86.12-1.3Z"
+            />
+          </svg>
         </button>
       </div>
     </header>
@@ -148,6 +162,19 @@
             </template>
           </div>
           <div v-else>
+            <div class="field">
+              <span>路线输入类型</span>
+              <div class="option-row">
+                <label class="option-pill">
+                  <input v-model="routeInputMode" type="radio" value="address" />
+                  <span>地址</span>
+                </label>
+                <label class="option-pill">
+                  <input v-model="routeInputMode" type="radio" value="coordinate" />
+                  <span>经纬度</span>
+                </label>
+              </div>
+            </div>
             <label class="field">
               <span>起始地列名</span>
               <select v-model="startColumnName">
@@ -172,31 +199,11 @@
             <select v-model="provider">
               <option value="mapbox">Mapbox</option>
               <option value="here">HERE</option>
-              <option value="custom">自定义接口</option>
+              <option value="custom" :disabled="mode === 'reverse'">自定义接口</option>
             </select>
           </label>
-          <template v-if="provider === 'custom'">
-            <label class="field">
-              <span>App ID</span>
-              <input v-model="customAppId" type="text" placeholder="输入 App ID" />
-            </label>
-            <label class="field">
-              <span>Credential</span>
-              <input v-model="customCredential" type="password" placeholder="输入 Credential" />
-            </label>
-            <label class="field">
-              <span>Token 接口 URL</span>
-              <input v-model="customTokenUrl" type="text" placeholder="getResAppDynamicToken 接口地址" />
-            </label>
-            <label class="field">
-              <span>地理编码接口 URL</span>
-              <input v-model="customGeocodeUrl" type="text" placeholder="geographicSearch 接口地址" />
-            </label>
-          </template>
-          <label v-else class="field">
-            <span>API Key</span>
-            <input v-model="providerApiKey" type="password" placeholder="输入服务商 API Key" />
-          </label>
+          <p v-if="mode === 'reverse'" class="hint">自定义接口暂不支持反编码。</p>
+          <p class="hint">服务商密钥与接口地址请在右上角设置中填写。</p>
           <div class="actions">
             <button class="primary" :disabled="!canStart" @click="handleStart">
               {{ startLabel }}
@@ -251,18 +258,89 @@
           <div ref="mapContainer" class="map"></div>
           <div v-if="!mapLoaded" class="map-config">
             <h3>地图配置</h3>
-            <label>
-              <span>Mapbox API Key</span>
-              <input v-model="mapApiKey" type="password" placeholder="用于地图展示" />
-            </label>
-            <button class="secondary" @click="applyMapKey">应用</button>
+            <p class="hint">请在设置中填写 Mapbox API Key。</p>
+            <button class="secondary" @click="showSettings = true">打开设置</button>
           </div>
           <div v-if="!mapLoaded" class="map-empty">
-            <p>请在右下角填写 Mapbox API Key 以加载地图。</p>
+            <p>请在设置中填写 Mapbox API Key 以加载地图。</p>
           </div>
         </div>
       </section>
     </main>
+
+    <div v-if="showSettings" class="settings-backdrop" @click.self="showSettings = false">
+      <div class="settings-modal" role="dialog" aria-modal="true" aria-label="设置">
+        <div class="settings-header">
+          <h2>设置</h2>
+          <button class="icon-button" type="button" @click="showSettings = false" aria-label="关闭">
+            ✕
+          </button>
+        </div>
+        <div class="settings-body">
+          <div class="settings-section">
+            <h3>服务商密钥</h3>
+            <label class="field">
+              <span>Mapbox API Key</span>
+              <input v-model="mapboxGeocodeApiKey" type="password" placeholder="用于编码/反编码/导航" />
+            </label>
+            <label class="field">
+              <span>HERE API Key</span>
+              <input v-model="hereGeocodeApiKey" type="password" placeholder="用于编码/反编码/导航" />
+            </label>
+          </div>
+          <div class="settings-section">
+            <h3>自定义接口</h3>
+            <label class="field">
+              <span>App ID</span>
+              <input v-model="customAppId" type="text" placeholder="输入 App ID" />
+            </label>
+            <label class="field">
+              <span>Credential</span>
+              <input v-model="customCredential" type="password" placeholder="输入 Credential" />
+            </label>
+            <label class="field">
+              <span>Token 接口 URL</span>
+              <input v-model="customTokenUrl" type="text" placeholder="getResAppDynamicToken 接口地址" />
+            </label>
+            <label class="field">
+              <span>地理编码接口 URL</span>
+              <input v-model="customGeocodeUrl" type="text" placeholder="geographicSearch 接口地址" />
+            </label>
+            <label class="field">
+              <span>导航接口 URL</span>
+              <input v-model="customRouteUrl" type="text" placeholder="routeSearch 接口地址" />
+            </label>
+            <label class="field">
+              <span>WebSocket 地址</span>
+              <input v-model="customWebSocketUrl" type="text" placeholder="ws://localhost:8765" />
+            </label>
+          </div>
+          <div class="settings-section">
+            <h3>地图展示</h3>
+            <label class="field">
+              <span>Mapbox API Key</span>
+              <input v-model="mapApiKey" type="password" placeholder="用于地图展示" />
+            </label>
+          </div>
+          <div class="settings-section">
+            <h3>配置文件</h3>
+            <div class="actions settings-actions">
+              <button class="secondary" type="button" @click="exportSettings">导出配置</button>
+              <button class="secondary" type="button" @click="triggerConfigImport">导入配置</button>
+              <input
+                ref="configFileInput"
+                class="visually-hidden"
+                type="file"
+                accept="application/json"
+                @change="handleConfigFileChange"
+              />
+            </div>
+            <p v-if="settingsNotice" class="hint settings-notice">{{ settingsNotice }}</p>
+            <p class="hint">仅导入/导出设置中的密钥、URL 等配置项。</p>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -283,15 +361,29 @@ const reverseDelimiterMode = ref("auto");
 const reverseDelimiter = ref(",");
 const startColumnName = ref("");
 const endColumnName = ref("");
+const routeInputMode = ref("address");
 const provider = ref("mapbox");
 const providerApiKey = ref("");
+const mapboxGeocodeApiKey = ref("");
+const hereGeocodeApiKey = ref("");
 const customAppId = ref("");
 const customCredential = ref("");
 const customTokenUrl = ref("");
 const customGeocodeUrl = ref("");
+const customRouteUrl = ref("");
 const customToken = ref("");
+const defaultWebSocketUrl = () => {
+  if (typeof window === "undefined") return "ws://localhost:8765";
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${protocol}://${window.location.hostname}:8765`;
+};
+const customWebSocketUrl = ref(defaultWebSocketUrl());
+const customSocket = ref(null);
 const mapApiKey = ref("");
 const logs = ref([]);
+const showSettings = ref(false);
+const settingsNotice = ref("");
+const configFileInput = ref(null);
 const geocodeCache = new Map();
 const reverseCache = new Map();
 const routeCache = new Map();
@@ -328,6 +420,8 @@ const storageKeys = {
   customCredential: "custom_credential",
   customTokenUrl: "custom_token_url",
   customGeocodeUrl: "custom_geocode_url",
+  customRouteUrl: "custom_route_url",
+  customWebSocketUrl: "custom_websocket_url",
   columnName: "geocode_column_name",
   latColumnName: "reverse_lat_column_name",
   lngColumnName: "reverse_lng_column_name",
@@ -337,6 +431,7 @@ const storageKeys = {
   reverseDelimiter: "reverse_delimiter",
   startColumnName: "route_start_column_name",
   endColumnName: "route_end_column_name",
+  routeInputMode: "route_input_mode",
   mode: "geocode_mode",
 };
 
@@ -348,14 +443,27 @@ const canStart = computed(() => {
     return false;
   }
   if (provider.value === "custom") {
-    if (mode.value !== "geocode") {
+    if (mode.value === "reverse") {
       return false;
+    }
+    if (mode.value === "route") {
+      return Boolean(
+        customAppId.value &&
+          customCredential.value &&
+          customTokenUrl.value &&
+          (routeInputMode.value === "address" ? customGeocodeUrl.value : true) &&
+          customRouteUrl.value &&
+          customWebSocketUrl.value &&
+          startColumnName.value &&
+          endColumnName.value
+      );
     }
     return Boolean(
       customAppId.value &&
         customCredential.value &&
         customTokenUrl.value &&
         customGeocodeUrl.value &&
+        customWebSocketUrl.value &&
         columnName.value
     );
   }
@@ -379,7 +487,15 @@ const canStart = computed(() => {
   );
 });
 
-const canDownload = computed(() => rows.value.length > 0 && points.value.length > 0);
+const canDownload = computed(() => {
+  if (geocodeState.running) {
+    return false;
+  }
+  if (mode.value === "route") {
+    return rows.value.length > 0;
+  }
+  return rows.value.length > 0 && points.value.length > 0;
+});
 const hasData = computed(() => rows.value.length > 0);
 const headerTitle = computed(() => {
   if (mode.value === "reverse") {
@@ -422,6 +538,21 @@ const resetProgress = () => {
   geocodeState.running = false;
 };
 
+const resetFileData = () => {
+  headers.value = [];
+  rows.value = [];
+  fileName.value = "";
+  columnName.value = "";
+  latColumnName.value = "";
+  lngColumnName.value = "";
+  reverseColumnName.value = "";
+  startColumnName.value = "";
+  endColumnName.value = "";
+  isDragging.value = false;
+  dropzoneFlash.value = false;
+  mockAnimating.value = false;
+};
+
 const resetResults = () => {
   logs.value = [];
   points.value = [];
@@ -429,6 +560,7 @@ const resetResults = () => {
   geocodeCache.clear();
   reverseCache.clear();
   routeCache.clear();
+  closeCustomSocket();
   resetProgress();
   refreshMarkers();
 };
@@ -493,14 +625,18 @@ const loadFile = (file) => {
     } else {
       startColumnName.value = headers.value[0] || "";
     }
-    const savedEndColumn = localStorage.getItem(storageKeys.endColumnName);
-    if (savedEndColumn && headers.value.includes(savedEndColumn)) {
-      endColumnName.value = savedEndColumn;
-    } else {
-      endColumnName.value = headers.value[1] || headers.value[0] || "";
-    }
-    resetResults();
-  };
+  const savedEndColumn = localStorage.getItem(storageKeys.endColumnName);
+  if (savedEndColumn && headers.value.includes(savedEndColumn)) {
+    endColumnName.value = savedEndColumn;
+  } else {
+    endColumnName.value = headers.value[1] || headers.value[0] || "";
+  }
+  const savedRouteInputMode = localStorage.getItem(storageKeys.routeInputMode);
+  if (savedRouteInputMode === "address" || savedRouteInputMode === "coordinate") {
+    routeInputMode.value = savedRouteInputMode;
+  }
+  resetResults();
+};
   reader.readAsArrayBuffer(file);
 };
 
@@ -616,6 +752,304 @@ const buildAddressMap = () => {
     addressMap.get(address).push(index);
   });
   return addressMap;
+};
+
+const buildRoutePayloads = () =>
+  rows.value.map((row, index) => {
+    const origin = String(row[startColumnName.value] ?? "").trim();
+    const destination = String(row[endColumnName.value] ?? "").trim();
+    return { index, origin, destination };
+  });
+
+const parseRouteCoordinate = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return { success: false, key: "-", message: "坐标为空" };
+  }
+  const delimiter = raw.includes(",") ? "," : raw.includes("，") ? "，" : "";
+  if (!delimiter) {
+    return { success: false, key: raw, message: "无法识别坐标分隔符" };
+  }
+  const parts = raw.split(delimiter).map((item) => item.trim());
+  if (parts.length < 2) {
+    return { success: false, key: raw, message: "坐标格式不完整" };
+  }
+  const lat = Number(parts[0]);
+  const lng = Number(parts[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return { success: false, key: raw, message: "纬度或经度不是有效数字" };
+  }
+  return { success: true, key: raw, lat, lng };
+};
+
+const closeCustomSocket = () => {
+  if (customSocket.value) {
+    customSocket.value.close();
+    customSocket.value = null;
+  }
+};
+
+const startCustomGeocode = () => {
+  if (!canStart.value) return;
+  closeCustomSocket();
+  logs.value = [];
+  points.value = [];
+  routeLine.value = null;
+  geocodeState.running = true;
+  geocodeState.processed = 0;
+  geocodeState.current = "";
+
+  const addressMap = buildAddressMap();
+  const addresses = Array.from(addressMap.keys());
+  geocodeState.total = addresses.length;
+  if (addresses.length === 0) {
+    geocodeState.running = false;
+    return;
+  }
+
+  let socket;
+  try {
+    socket = new WebSocket(customWebSocketUrl.value);
+  } catch (error) {
+    logs.value.push({
+      address: "-",
+      type: "network_error",
+      request: customWebSocketUrl.value,
+      response: `无法连接 WebSocket: ${String(error)}`,
+    });
+    geocodeState.running = false;
+    return;
+  }
+
+  customSocket.value = socket;
+
+  socket.onopen = () => {
+    socket.send(
+      JSON.stringify({
+        type: "start",
+        payload: {
+          config: {
+            appId: customAppId.value,
+            credential: customCredential.value,
+            tokenUrl: customTokenUrl.value,
+            geocodeUrl: customGeocodeUrl.value,
+          },
+          addresses,
+        },
+      })
+    );
+  };
+
+  socket.onmessage = (event) => {
+    let message;
+    try {
+      message = JSON.parse(event.data);
+    } catch (error) {
+      logs.value.push({
+        address: "-",
+        type: "parse_error",
+        request: "WebSocket",
+        response: `无法解析后端返回: ${String(error)}`,
+      });
+      return;
+    }
+
+    if (message.type === "progress") {
+      const payload = message.payload || {};
+      const address = payload.address || "-";
+      geocodeState.current = address;
+      if (Number.isFinite(payload.processed)) {
+        geocodeState.processed = payload.processed;
+      } else {
+        geocodeState.processed += 1;
+      }
+      if (payload.success) {
+        const lat = payload.lat;
+        const lng = payload.lng;
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          geocodeCache.set(address, { success: true, lat, lng });
+          const indices = addressMap.get(address) || [];
+          indices.forEach((rowIndex) => {
+            rows.value[rowIndex].纬度 = lat;
+            rows.value[rowIndex].经度 = lng;
+          });
+          points.value.push({ lat, lng });
+        } else {
+          logs.value.push({
+            address,
+            type: "no_result",
+            request: payload.request || "custom",
+            response: "未返回可用经纬度",
+          });
+        }
+      } else {
+        logs.value.push({
+          address,
+          type: payload.errorType || "network_error",
+          request: payload.request || "custom",
+          response: payload.response || "请求失败",
+        });
+      }
+    }
+
+    if (message.type === "complete") {
+      geocodeState.running = false;
+      geocodeState.current = "";
+      closeCustomSocket();
+      refreshMarkers();
+    }
+  };
+
+  socket.onerror = () => {
+    logs.value.push({
+      address: "-",
+      type: "network_error",
+      request: customWebSocketUrl.value,
+      response: "WebSocket 连接异常",
+    });
+  };
+
+  socket.onclose = () => {
+    if (geocodeState.running) {
+      geocodeState.running = false;
+      geocodeState.current = "";
+      refreshMarkers();
+    }
+    closeCustomSocket();
+  };
+};
+
+const startCustomRoute = () => {
+  if (!canStart.value) return;
+  closeCustomSocket();
+  logs.value = [];
+  points.value = [];
+  routeLine.value = null;
+  geocodeState.running = true;
+  geocodeState.processed = 0;
+  geocodeState.current = "";
+
+  const routes = buildRoutePayloads();
+  geocodeState.total = routes.length;
+  if (routes.length === 0) {
+    geocodeState.running = false;
+    return;
+  }
+
+  let socket;
+  try {
+    socket = new WebSocket(customWebSocketUrl.value);
+  } catch (error) {
+    logs.value.push({
+      address: "-",
+      type: "network_error",
+      request: customWebSocketUrl.value,
+      response: `无法连接 WebSocket: ${String(error)}`,
+    });
+    geocodeState.running = false;
+    return;
+  }
+
+  customSocket.value = socket;
+
+  socket.onopen = () => {
+    socket.send(
+      JSON.stringify({
+        type: "start",
+        payload: {
+          mode: "route",
+          routeInputMode: routeInputMode.value,
+          config: {
+            appId: customAppId.value,
+            credential: customCredential.value,
+            tokenUrl: customTokenUrl.value,
+            geocodeUrl: customGeocodeUrl.value,
+            routeUrl: customRouteUrl.value,
+          },
+          routes: routes.map((route) => ({
+            origin: route.origin,
+            destination: route.destination,
+          })),
+        },
+      })
+    );
+  };
+
+  socket.onmessage = (event) => {
+    let message;
+    try {
+      message = JSON.parse(event.data);
+    } catch (error) {
+      logs.value.push({
+        address: "-",
+        type: "parse_error",
+        request: "WebSocket",
+        response: `无法解析后端返回: ${String(error)}`,
+      });
+      return;
+    }
+
+    if (message.type === "progress") {
+      const payload = message.payload || {};
+      const routeIndex = Number(payload.index);
+      const route = Number.isFinite(routeIndex) ? routes[routeIndex] : null;
+      const address = route ? `${route.origin} -> ${route.destination}` : "-";
+      geocodeState.current = address;
+      if (Number.isFinite(payload.processed)) {
+        geocodeState.processed = payload.processed;
+      } else {
+        geocodeState.processed += 1;
+      }
+
+      if (payload.success && route) {
+        const distanceKm = payload.distanceKm;
+        const durationMin = payload.durationMin;
+        if (distanceKm != null && durationMin != null) {
+          rows.value[route.index]["导航距离(km)"] = distanceKm;
+          rows.value[route.index]["导航时间(min)"] = durationMin;
+        } else {
+          logs.value.push({
+            address,
+            type: "no_result",
+            request: payload.request || "custom",
+            response: "未返回可用导航数据",
+          });
+        }
+      } else {
+        logs.value.push({
+          address,
+          type: payload.errorType || "network_error",
+          request: payload.request || "custom",
+          response: payload.response || "请求失败",
+        });
+      }
+    }
+
+    if (message.type === "complete") {
+      geocodeState.running = false;
+      geocodeState.current = "";
+      closeCustomSocket();
+      refreshMarkers();
+    }
+  };
+
+  socket.onerror = () => {
+    logs.value.push({
+      address: "-",
+      type: "network_error",
+      request: customWebSocketUrl.value,
+      response: "WebSocket 连接异常",
+    });
+  };
+
+  socket.onclose = () => {
+    if (geocodeState.running) {
+      geocodeState.running = false;
+      geocodeState.current = "";
+      refreshMarkers();
+    }
+    closeCustomSocket();
+  };
 };
 
 const startGeocode = async () => {
@@ -770,6 +1204,49 @@ const startRoute = async () => {
       geocodeState.processed += 1;
       continue;
     }
+
+    if (routeInputMode.value === "coordinate") {
+      const parsedOrigin = parseRouteCoordinate(origin);
+      const parsedDestination = parseRouteCoordinate(destination);
+      if (!parsedOrigin.success || !parsedDestination.success) {
+        logs.value.push({
+          address: routeKey,
+          type: "invalid",
+          request: "输入格式错误",
+          response: `${parsedOrigin.message || ""} ${parsedDestination.message || ""}`.trim(),
+        });
+        geocodeState.processed += 1;
+        continue;
+      }
+      let result = routeCache.get(routeKey);
+      if (!result) {
+        result = await fetchRoute(
+          parsedOrigin.lat,
+          parsedOrigin.lng,
+          parsedDestination.lat,
+          parsedDestination.lng
+        );
+        routeCache.set(routeKey, result);
+      }
+      geocodeState.processed += 1;
+      if (result.success) {
+        row["导航距离(km)"] = result.distanceKm;
+        row["导航时间(min)"] = result.durationMin;
+        points.value.push(
+          { lat: parsedOrigin.lat, lng: parsedOrigin.lng, type: "origin" },
+          { lat: parsedDestination.lat, lng: parsedDestination.lng, type: "destination" }
+        );
+        routeLine.value = result.line;
+      } else {
+        logs.value.push({
+          address: routeKey,
+          type: result.type,
+          request: result.request,
+          response: result.response,
+        });
+      }
+      continue;
+    }
     let result = routeCache.get(routeKey);
     if (!result) {
       const originResult = geocodeCache.get(origin) || (await geocodeAddress(origin));
@@ -824,9 +1301,17 @@ const handleStart = () => {
   if (mode.value === "reverse") {
     startReverseGeocode();
   } else if (mode.value === "route") {
-    startRoute();
+    if (provider.value === "custom") {
+      startCustomRoute();
+    } else {
+      startRoute();
+    }
   } else {
-    startGeocode();
+    if (provider.value === "custom") {
+      startCustomGeocode();
+    } else {
+      startGeocode();
+    }
   }
 };
 
@@ -905,9 +1390,17 @@ const geocodeAddress = async (address) => {
           response: JSON.stringify(body),
         };
       }
-    const [lng, lat] = body.features[0].center;
-    return { success: true, lat, lng };
-  } catch (error) {
+      const [lng, lat] = body.features[0].center || [];
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return {
+          success: false,
+          type: "no_result",
+          request: url,
+          response: JSON.stringify(body),
+        };
+      }
+      return { success: true, lat, lng };
+    } catch (error) {
       return {
         success: false,
         type: "network_error",
@@ -937,7 +1430,15 @@ const geocodeAddress = async (address) => {
         response: JSON.stringify(body),
       };
     }
-    const { lat, lng } = body.items[0].position;
+    const { lat, lng } = body.items[0].position || {};
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return {
+        success: false,
+        type: "no_result",
+        request: url,
+        response: JSON.stringify(body),
+      };
+    }
     return { success: true, lat, lng };
   } catch (error) {
     return {
@@ -1344,6 +1845,91 @@ const updateRouteLayer = () => {
   }
 };
 
+const exportSettings = () => {
+  const payload = {
+    version: 1,
+    data: {
+      mapboxGeocodeApiKey: mapboxGeocodeApiKey.value,
+      hereGeocodeApiKey: hereGeocodeApiKey.value,
+      customAppId: customAppId.value,
+      customCredential: customCredential.value,
+      customTokenUrl: customTokenUrl.value,
+      customGeocodeUrl: customGeocodeUrl.value,
+      customRouteUrl: customRouteUrl.value,
+      customWebSocketUrl: customWebSocketUrl.value,
+      mapApiKey: mapApiKey.value,
+    },
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "network-tools-config.json";
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+};
+
+const triggerConfigImport = () => {
+  settingsNotice.value = "";
+  configFileInput.value?.click();
+};
+
+const applyConfigValue = (value, setter) => {
+  if (typeof value === "string") {
+    setter(value);
+  }
+};
+
+const handleConfigFileChange = async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  settingsNotice.value = "";
+  try {
+    const content = await file.text();
+    const parsed = JSON.parse(content);
+    const config = parsed?.data && typeof parsed.data === "object" ? parsed.data : parsed;
+    if (!config || typeof config !== "object") {
+      throw new Error("配置格式不正确");
+    }
+    applyConfigValue(config.mapboxGeocodeApiKey, (value) => {
+      mapboxGeocodeApiKey.value = value;
+    });
+    applyConfigValue(config.hereGeocodeApiKey, (value) => {
+      hereGeocodeApiKey.value = value;
+    });
+    applyConfigValue(config.customAppId, (value) => {
+      customAppId.value = value;
+    });
+    applyConfigValue(config.customCredential, (value) => {
+      customCredential.value = value;
+    });
+    applyConfigValue(config.customTokenUrl, (value) => {
+      customTokenUrl.value = value;
+    });
+    applyConfigValue(config.customGeocodeUrl, (value) => {
+      customGeocodeUrl.value = value;
+    });
+    applyConfigValue(config.customRouteUrl, (value) => {
+      customRouteUrl.value = value;
+    });
+    applyConfigValue(config.customWebSocketUrl, (value) => {
+      customWebSocketUrl.value = value;
+    });
+    applyConfigValue(config.mapApiKey, (value) => {
+      mapApiKey.value = value;
+      localStorage.setItem(storageKeys.mapboxMap, value);
+      initMap();
+    });
+    settingsNotice.value = `配置已导入：${file.name}`;
+  } catch (error) {
+    settingsNotice.value = `导入失败：${error.message || "配置解析异常"}`;
+  } finally {
+    event.target.value = "";
+  }
+};
+
 onMounted(() => {
   const savedMode = localStorage.getItem(storageKeys.mode);
   if (savedMode && modeOptions.some((item) => item.value === savedMode)) {
@@ -1358,6 +1944,8 @@ onMounted(() => {
     const savedCredential = localStorage.getItem(storageKeys.customCredential);
     const savedTokenUrl = localStorage.getItem(storageKeys.customTokenUrl);
     const savedGeocodeUrl = localStorage.getItem(storageKeys.customGeocodeUrl);
+    const savedRouteUrl = localStorage.getItem(storageKeys.customRouteUrl);
+    const savedWebSocketUrl = localStorage.getItem(storageKeys.customWebSocketUrl);
     if (savedAppId) {
       customAppId.value = savedAppId;
     }
@@ -1370,11 +1958,29 @@ onMounted(() => {
     if (savedGeocodeUrl) {
       customGeocodeUrl.value = savedGeocodeUrl;
     }
+    if (savedRouteUrl) {
+      customRouteUrl.value = savedRouteUrl;
+    }
+    if (savedWebSocketUrl) {
+      customWebSocketUrl.value = savedWebSocketUrl;
+    }
   } else {
     const savedProviderKey = localStorage.getItem(getProviderStorageKey(provider.value));
     if (savedProviderKey) {
       providerApiKey.value = savedProviderKey;
     }
+  }
+  const savedMapboxKey = localStorage.getItem(storageKeys.mapboxGeocode);
+  if (savedMapboxKey) {
+    mapboxGeocodeApiKey.value = savedMapboxKey;
+  }
+  const savedHereKey = localStorage.getItem(storageKeys.hereGeocode);
+  if (savedHereKey) {
+    hereGeocodeApiKey.value = savedHereKey;
+  }
+  if (provider.value !== "custom") {
+    providerApiKey.value =
+      provider.value === "mapbox" ? mapboxGeocodeApiKey.value : hereGeocodeApiKey.value;
   }
   const savedReverseMode = localStorage.getItem(storageKeys.reverseColumnMode);
   if (savedReverseMode === "single" || savedReverseMode === "separate") {
@@ -1392,6 +1998,10 @@ onMounted(() => {
   if (savedDelimiter) {
     reverseDelimiter.value = savedDelimiter;
   }
+  const savedRouteInputMode = localStorage.getItem(storageKeys.routeInputMode);
+  if (savedRouteInputMode === "address" || savedRouteInputMode === "coordinate") {
+    routeInputMode.value = savedRouteInputMode;
+  }
   const savedKey = localStorage.getItem(storageKeys.mapboxMap);
   if (savedKey) {
     mapApiKey.value = savedKey;
@@ -1406,20 +2016,30 @@ watch(provider, (value) => {
   if (value === "custom") {
     providerApiKey.value = "";
   } else {
-    const savedKey = localStorage.getItem(getProviderStorageKey(value));
-    providerApiKey.value = savedKey || "";
+    providerApiKey.value =
+      value === "mapbox" ? mapboxGeocodeApiKey.value || "" : hereGeocodeApiKey.value || "";
   }
 });
 
-watch(providerApiKey, (value) => {
-  if (provider.value === "custom") {
-    return;
-  }
-  const key = getProviderStorageKey(provider.value);
+watch(mapboxGeocodeApiKey, (value) => {
   if (value) {
-    localStorage.setItem(key, value);
+    localStorage.setItem(storageKeys.mapboxGeocode, value);
   } else {
-    localStorage.removeItem(key);
+    localStorage.removeItem(storageKeys.mapboxGeocode);
+  }
+  if (provider.value === "mapbox") {
+    providerApiKey.value = value || "";
+  }
+});
+
+watch(hereGeocodeApiKey, (value) => {
+  if (value) {
+    localStorage.setItem(storageKeys.hereGeocode, value);
+  } else {
+    localStorage.removeItem(storageKeys.hereGeocode);
+  }
+  if (provider.value === "here") {
+    providerApiKey.value = value || "";
   }
 });
 
@@ -1455,6 +2075,22 @@ watch(customGeocodeUrl, (value) => {
     localStorage.setItem(storageKeys.customGeocodeUrl, value);
   } else {
     localStorage.removeItem(storageKeys.customGeocodeUrl);
+  }
+});
+
+watch(customRouteUrl, (value) => {
+  if (value) {
+    localStorage.setItem(storageKeys.customRouteUrl, value);
+  } else {
+    localStorage.removeItem(storageKeys.customRouteUrl);
+  }
+});
+
+watch(customWebSocketUrl, (value) => {
+  if (value) {
+    localStorage.setItem(storageKeys.customWebSocketUrl, value);
+  } else {
+    localStorage.removeItem(storageKeys.customWebSocketUrl);
   }
 });
 
@@ -1530,8 +2166,20 @@ watch(endColumnName, (value) => {
   }
 });
 
+watch(routeInputMode, (value) => {
+  if (value) {
+    localStorage.setItem(storageKeys.routeInputMode, value);
+  } else {
+    localStorage.removeItem(storageKeys.routeInputMode);
+  }
+});
+
 watch(mode, (value) => {
   localStorage.setItem(storageKeys.mode, value);
+  if (value === "reverse" && provider.value === "custom") {
+    provider.value = "mapbox";
+  }
+  resetFileData();
   resetResults();
 });
 </script>

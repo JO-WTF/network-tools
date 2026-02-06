@@ -58,6 +58,12 @@ h1 {
   border-radius: 999px;
 }
 
+.header-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .mode-button {
   border-radius: 999px;
   padding: 8px 16px;
@@ -73,6 +79,23 @@ h1 {
   background: #2563eb;
   color: #ffffff;
   box-shadow: 0 6px 14px rgba(37, 99, 235, 0.3);
+}
+
+.settings-button {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-button svg {
+  width: 18px;
+  height: 18px;
+  fill: #475569;
 }
 
 .layout {
@@ -198,6 +221,78 @@ h1 {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 50;
+}
+
+.settings-modal {
+  background: #ffffff;
+  border-radius: 18px;
+  width: min(720px, 100%);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.2);
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 0;
+}
+
+.settings-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.settings-body {
+  padding: 16px 24px 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-section {
+  background: #f8fafc;
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.settings-section h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: #1e293b;
+}
+
+.settings-actions {
+  align-items: center;
+}
+
+.settings-notice {
+  margin-top: 10px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
 }
 
 button {
