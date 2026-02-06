@@ -184,6 +184,14 @@
               <span>Credential</span>
               <input v-model="customCredential" type="password" placeholder="输入 Credential" />
             </label>
+            <label class="field">
+              <span>Token 接口 URL</span>
+              <input v-model="customTokenUrl" type="text" placeholder="getResAppDynamicToken 接口地址" />
+            </label>
+            <label class="field">
+              <span>地理编码接口 URL</span>
+              <input v-model="customGeocodeUrl" type="text" placeholder="geographicSearch 接口地址" />
+            </label>
           </template>
           <label v-else class="field">
             <span>API Key</span>
@@ -279,6 +287,8 @@ const provider = ref("mapbox");
 const providerApiKey = ref("");
 const customAppId = ref("");
 const customCredential = ref("");
+const customTokenUrl = ref("");
+const customGeocodeUrl = ref("");
 const customToken = ref("");
 const mapApiKey = ref("");
 const logs = ref([]);
@@ -316,6 +326,8 @@ const storageKeys = {
   mapboxMap: "mapbox_map_api_key",
   customAppId: "custom_app_id",
   customCredential: "custom_credential",
+  customTokenUrl: "custom_token_url",
+  customGeocodeUrl: "custom_geocode_url",
   columnName: "geocode_column_name",
   latColumnName: "reverse_lat_column_name",
   lngColumnName: "reverse_lng_column_name",
@@ -339,7 +351,13 @@ const canStart = computed(() => {
     if (mode.value !== "geocode") {
       return false;
     }
-    return Boolean(customAppId.value && customCredential.value && columnName.value);
+    return Boolean(
+      customAppId.value &&
+        customCredential.value &&
+        customTokenUrl.value &&
+        customGeocodeUrl.value &&
+        columnName.value
+    );
   }
   if (!providerApiKey.value) {
     return false;
@@ -820,11 +838,11 @@ const geocodeAddress = async (address) => {
       return {
         success: false,
         type: "auth_error",
-        request: "getResAppDynamicToken",
+        request: customTokenUrl.value || "getResAppDynamicToken",
         response: "无法获取自定义接口 Token",
       };
     }
-    const url = "geographicSearch";
+    const url = customGeocodeUrl.value || "geographicSearch";
     try {
       const response = await fetch(url, {
         method: "POST",
@@ -935,7 +953,7 @@ const fetchCustomToken = async () => {
   if (customToken.value) {
     return customToken.value;
   }
-  const url = "getResAppDynamicToken";
+  const url = customTokenUrl.value || "getResAppDynamicToken";
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -1338,11 +1356,19 @@ onMounted(() => {
   if (provider.value === "custom") {
     const savedAppId = localStorage.getItem(storageKeys.customAppId);
     const savedCredential = localStorage.getItem(storageKeys.customCredential);
+    const savedTokenUrl = localStorage.getItem(storageKeys.customTokenUrl);
+    const savedGeocodeUrl = localStorage.getItem(storageKeys.customGeocodeUrl);
     if (savedAppId) {
       customAppId.value = savedAppId;
     }
     if (savedCredential) {
       customCredential.value = savedCredential;
+    }
+    if (savedTokenUrl) {
+      customTokenUrl.value = savedTokenUrl;
+    }
+    if (savedGeocodeUrl) {
+      customGeocodeUrl.value = savedGeocodeUrl;
     }
   } else {
     const savedProviderKey = localStorage.getItem(getProviderStorageKey(provider.value));
@@ -1412,6 +1438,23 @@ watch(customCredential, (value) => {
     localStorage.setItem(storageKeys.customCredential, value);
   } else {
     localStorage.removeItem(storageKeys.customCredential);
+  }
+});
+
+watch(customTokenUrl, (value) => {
+  customToken.value = "";
+  if (value) {
+    localStorage.setItem(storageKeys.customTokenUrl, value);
+  } else {
+    localStorage.removeItem(storageKeys.customTokenUrl);
+  }
+});
+
+watch(customGeocodeUrl, (value) => {
+  if (value) {
+    localStorage.setItem(storageKeys.customGeocodeUrl, value);
+  } else {
+    localStorage.removeItem(storageKeys.customGeocodeUrl);
   }
 });
 
