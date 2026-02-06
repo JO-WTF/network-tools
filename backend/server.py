@@ -13,12 +13,14 @@ async def fetch_token(session, config):
         "appId": config.get("appId", ""),
         "credential": config.get("credential", ""),
     }
-    async with session.post(token_url, json=payload) as response:
+    print(payload)
+    async with session.post(token_url, json=payload, ssl=False) as response:
         data = await response.json()
         if response.status != 200:
             return ""
+        print(data)
         status = data.get("status", {})
-        if status.get("statusCode") != "SUCESS":
+        if status.get("statusCode") != "SUCCESS":
             return ""
         return data.get("result", "")
 
@@ -36,9 +38,9 @@ async def geocode_address(session, token, config, address):
     if token:
         headers["Authorization"] = token
     payload = {"address": address, "language": "en", "coordType": "wgs84"}
-    async with session.post(geocode_url, json=payload, headers=headers) as response:
+    async with session.post(geocode_url, json=payload, headers=headers, ssl=False) as response:
         data = await response.json()
-        if response.status != 200 or data.get("result", {}).get("status") != "OK":
+        if response.status != 200 or data.get("status") != "OK":
             return {
                 "success": False,
                 "errorType": "network_error",
