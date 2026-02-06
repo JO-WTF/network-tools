@@ -479,6 +479,9 @@ const resetFileData = () => {
   reverseColumnName.value = "";
   startColumnName.value = "";
   endColumnName.value = "";
+  isDragging.value = false;
+  dropzoneFlash.value = false;
+  mockAnimating.value = false;
 };
 
 const resetResults = () => {
