@@ -488,6 +488,9 @@ const canStart = computed(() => {
 });
 
 const canDownload = computed(() => {
+  if (geocodeState.running) {
+    return false;
+  }
   if (mode.value === "route") {
     return rows.value.length > 0;
   }
