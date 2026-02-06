@@ -192,6 +192,10 @@
               <span>地理编码接口 URL</span>
               <input v-model="customGeocodeUrl" type="text" placeholder="geographicSearch 接口地址" />
             </label>
+            <label class="field">
+              <span>WebSocket 地址</span>
+              <input v-model="customWebSocketUrl" type="text" placeholder="ws://localhost:8765" />
+            </label>
           </template>
           <label v-else class="field">
             <span>API Key</span>
@@ -290,7 +294,12 @@ const customCredential = ref("");
 const customTokenUrl = ref("");
 const customGeocodeUrl = ref("");
 const customToken = ref("");
-const customWebSocketUrl = "ws://localhost:8765";
+const defaultWebSocketUrl = () => {
+  if (typeof window === "undefined") return "ws://localhost:8765";
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${protocol}://${window.location.hostname}:8765`;
+};
+const customWebSocketUrl = ref(defaultWebSocketUrl());
 const customSocket = ref(null);
 const mapApiKey = ref("");
 const logs = ref([]);
@@ -330,6 +339,7 @@ const storageKeys = {
   customCredential: "custom_credential",
   customTokenUrl: "custom_token_url",
   customGeocodeUrl: "custom_geocode_url",
+  customWebSocketUrl: "custom_websocket_url",
   columnName: "geocode_column_name",
   latColumnName: "reverse_lat_column_name",
   lngColumnName: "reverse_lng_column_name",
@@ -358,6 +368,7 @@ const canStart = computed(() => {
         customCredential.value &&
         customTokenUrl.value &&
         customGeocodeUrl.value &&
+        customWebSocketUrl.value &&
         columnName.value
     );
   }
@@ -648,12 +659,12 @@ const startCustomGeocode = () => {
 
   let socket;
   try {
-    socket = new WebSocket(customWebSocketUrl);
+    socket = new WebSocket(customWebSocketUrl.value);
   } catch (error) {
     logs.value.push({
       address: "-",
       type: "network_error",
-      request: customWebSocketUrl,
+      request: customWebSocketUrl.value,
       response: `无法连接 WebSocket: ${String(error)}`,
     });
     geocodeState.running = false;
@@ -734,7 +745,7 @@ const startCustomGeocode = () => {
     logs.value.push({
       address: "-",
       type: "network_error",
-      request: customWebSocketUrl,
+      request: customWebSocketUrl.value,
       response: "WebSocket 连接异常",
     });
   };
@@ -1493,6 +1504,7 @@ onMounted(() => {
     const savedCredential = localStorage.getItem(storageKeys.customCredential);
     const savedTokenUrl = localStorage.getItem(storageKeys.customTokenUrl);
     const savedGeocodeUrl = localStorage.getItem(storageKeys.customGeocodeUrl);
+    const savedWebSocketUrl = localStorage.getItem(storageKeys.customWebSocketUrl);
     if (savedAppId) {
       customAppId.value = savedAppId;
     }
@@ -1504,6 +1516,9 @@ onMounted(() => {
     }
     if (savedGeocodeUrl) {
       customGeocodeUrl.value = savedGeocodeUrl;
+    }
+    if (savedWebSocketUrl) {
+      customWebSocketUrl.value = savedWebSocketUrl;
     }
   } else {
     const savedProviderKey = localStorage.getItem(getProviderStorageKey(provider.value));
@@ -1590,6 +1605,14 @@ watch(customGeocodeUrl, (value) => {
     localStorage.setItem(storageKeys.customGeocodeUrl, value);
   } else {
     localStorage.removeItem(storageKeys.customGeocodeUrl);
+  }
+});
+
+watch(customWebSocketUrl, (value) => {
+  if (value) {
+    localStorage.setItem(storageKeys.customWebSocketUrl, value);
+  } else {
+    localStorage.removeItem(storageKeys.customWebSocketUrl);
   }
 });
 

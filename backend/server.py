@@ -83,8 +83,6 @@ async def handle_connection(websocket):
 
         config = payload.get("payload", {}).get("config", {})
         addresses = payload.get("payload", {}).get("addresses", [])
-        total = len(addresses)
-
         async with aiohttp.ClientSession() as session:
             token = await fetch_token(session, config)
             if not token:
