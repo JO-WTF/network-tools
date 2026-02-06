@@ -172,9 +172,20 @@
             <select v-model="provider">
               <option value="mapbox">Mapbox</option>
               <option value="here">HERE</option>
+              <option value="custom">自定义接口</option>
             </select>
           </label>
-          <label class="field">
+          <template v-if="provider === 'custom'">
+            <label class="field">
+              <span>App ID</span>
+              <input v-model="customAppId" type="text" placeholder="输入 App ID" />
+            </label>
+            <label class="field">
+              <span>Credential</span>
+              <input v-model="customCredential" type="password" placeholder="输入 Credential" />
+            </label>
+          </template>
+          <label v-else class="field">
             <span>API Key</span>
             <input v-model="providerApiKey" type="password" placeholder="输入服务商 API Key" />
           </label>
@@ -266,6 +277,9 @@ const startColumnName = ref("");
 const endColumnName = ref("");
 const provider = ref("mapbox");
 const providerApiKey = ref("");
+const customAppId = ref("");
+const customCredential = ref("");
+const customToken = ref("");
 const mapApiKey = ref("");
 const logs = ref([]);
 const geocodeCache = new Map();
@@ -300,6 +314,8 @@ const storageKeys = {
   mapboxGeocode: "mapbox_geocode_api_key",
   hereGeocode: "here_geocode_api_key",
   mapboxMap: "mapbox_map_api_key",
+  customAppId: "custom_app_id",
+  customCredential: "custom_credential",
   columnName: "geocode_column_name",
   latColumnName: "reverse_lat_column_name",
   lngColumnName: "reverse_lng_column_name",
@@ -316,7 +332,16 @@ const getProviderStorageKey = (currentProvider) =>
   currentProvider === "mapbox" ? storageKeys.mapboxGeocode : storageKeys.hereGeocode;
 
 const canStart = computed(() => {
-  if (geocodeState.running || rows.value.length === 0 || !providerApiKey.value) {
+  if (geocodeState.running || rows.value.length === 0) {
+    return false;
+  }
+  if (provider.value === "custom") {
+    if (mode.value !== "geocode") {
+      return false;
+    }
+    return Boolean(customAppId.value && customCredential.value && columnName.value);
+  }
+  if (!providerApiKey.value) {
     return false;
   }
   if (mode.value === "geocode") {
@@ -789,6 +814,58 @@ const handleStart = () => {
 
 const geocodeAddress = async (address) => {
   const encoded = encodeURIComponent(address);
+  if (provider.value === "custom") {
+    const token = await fetchCustomToken();
+    if (!token) {
+      return {
+        success: false,
+        type: "auth_error",
+        request: "getResAppDynamicToken",
+        response: "无法获取自定义接口 Token",
+      };
+    }
+    const url = "geographicSearch";
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: token,
+        },
+        body: JSON.stringify({
+          address,
+          language: "en",
+          coordType: "wgs84",
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok || body?.result?.status !== "OK") {
+        return {
+          success: false,
+          type: "network_error",
+          request: url,
+          response: JSON.stringify(body),
+        };
+      }
+      const location = body?.result?.geometry?.location;
+      if (!location || location.lat == null || location.lng == null) {
+        return {
+          success: false,
+          type: "no_result",
+          request: url,
+          response: JSON.stringify(body),
+        };
+      }
+      return { success: true, lat: location.lat, lng: location.lng };
+    } catch (error) {
+      return {
+        success: false,
+        type: "network_error",
+        request: url,
+        response: String(error),
+      };
+    }
+  }
   if (provider.value === "mapbox") {
     const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encoded}.json?access_token=${providerApiKey.value}`;
     try {
@@ -851,6 +928,31 @@ const geocodeAddress = async (address) => {
       request: url,
       response: String(error),
     };
+  }
+};
+
+const fetchCustomToken = async () => {
+  if (customToken.value) {
+    return customToken.value;
+  }
+  const url = "getResAppDynamicToken";
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        appId: customAppId.value,
+        credential: customCredential.value,
+      }),
+    });
+    const body = await response.json();
+    if (!response.ok || body?.status?.statusCode !== "SUCESS" || !body?.result) {
+      return "";
+    }
+    customToken.value = body.result;
+    return customToken.value;
+  } catch (error) {
+    return "";
   }
 };
 
@@ -1230,12 +1332,23 @@ onMounted(() => {
     mode.value = savedMode;
   }
   const savedProvider = localStorage.getItem(storageKeys.provider);
-  if (savedProvider === "mapbox" || savedProvider === "here") {
+  if (savedProvider === "mapbox" || savedProvider === "here" || savedProvider === "custom") {
     provider.value = savedProvider;
   }
-  const savedProviderKey = localStorage.getItem(getProviderStorageKey(provider.value));
-  if (savedProviderKey) {
-    providerApiKey.value = savedProviderKey;
+  if (provider.value === "custom") {
+    const savedAppId = localStorage.getItem(storageKeys.customAppId);
+    const savedCredential = localStorage.getItem(storageKeys.customCredential);
+    if (savedAppId) {
+      customAppId.value = savedAppId;
+    }
+    if (savedCredential) {
+      customCredential.value = savedCredential;
+    }
+  } else {
+    const savedProviderKey = localStorage.getItem(getProviderStorageKey(provider.value));
+    if (savedProviderKey) {
+      providerApiKey.value = savedProviderKey;
+    }
   }
   const savedReverseMode = localStorage.getItem(storageKeys.reverseColumnMode);
   if (savedReverseMode === "single" || savedReverseMode === "separate") {
@@ -1264,16 +1377,41 @@ onMounted(() => {
 
 watch(provider, (value) => {
   localStorage.setItem(storageKeys.provider, value);
-  const savedKey = localStorage.getItem(getProviderStorageKey(value));
-  providerApiKey.value = savedKey || "";
+  if (value === "custom") {
+    providerApiKey.value = "";
+  } else {
+    const savedKey = localStorage.getItem(getProviderStorageKey(value));
+    providerApiKey.value = savedKey || "";
+  }
 });
 
 watch(providerApiKey, (value) => {
+  if (provider.value === "custom") {
+    return;
+  }
   const key = getProviderStorageKey(provider.value);
   if (value) {
     localStorage.setItem(key, value);
   } else {
     localStorage.removeItem(key);
+  }
+});
+
+watch(customAppId, (value) => {
+  customToken.value = "";
+  if (value) {
+    localStorage.setItem(storageKeys.customAppId, value);
+  } else {
+    localStorage.removeItem(storageKeys.customAppId);
+  }
+});
+
+watch(customCredential, (value) => {
+  customToken.value = "";
+  if (value) {
+    localStorage.setItem(storageKeys.customCredential, value);
+  } else {
+    localStorage.removeItem(storageKeys.customCredential);
   }
 });
 
