@@ -469,6 +469,18 @@ const resetProgress = () => {
   geocodeState.running = false;
 };
 
+const resetFileData = () => {
+  headers.value = [];
+  rows.value = [];
+  fileName.value = "";
+  columnName.value = "";
+  latColumnName.value = "";
+  lngColumnName.value = "";
+  reverseColumnName.value = "";
+  startColumnName.value = "";
+  endColumnName.value = "";
+};
+
 const resetResults = () => {
   logs.value = [];
   points.value = [];
@@ -1988,6 +2000,7 @@ watch(mode, (value) => {
   if (value === "reverse" && provider.value === "custom") {
     provider.value = "mapbox";
   }
+  resetFileData();
   resetResults();
 });
 </script>
