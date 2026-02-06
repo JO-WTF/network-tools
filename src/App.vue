@@ -400,6 +400,7 @@ const geocodeState = reactive({
 });
 const points = ref([]);
 const routeLine = ref(null);
+const routeSummary = ref(null);
 const mode = ref("geocode");
 
 const modeOptions = [
@@ -410,6 +411,8 @@ const modeOptions = [
 
 let mapInstance = null;
 let mapMarkers = [];
+let routePopup = null;
+let routeHoverHandlers = null;
 
 const storageKeys = {
   provider: "geocode_provider",
@@ -557,6 +560,7 @@ const resetResults = () => {
   logs.value = [];
   points.value = [];
   routeLine.value = null;
+  routeSummary.value = null;
   geocodeCache.clear();
   reverseCache.clear();
   routeCache.clear();
@@ -866,14 +870,14 @@ const startCustomGeocode = () => {
       if (payload.success) {
         const lat = payload.lat;
         const lng = payload.lng;
-        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          if (Number.isFinite(lat) && Number.isFinite(lng)) {
           geocodeCache.set(address, { success: true, lat, lng });
           const indices = addressMap.get(address) || [];
           indices.forEach((rowIndex) => {
             rows.value[rowIndex].纬度 = lat;
             rows.value[rowIndex].经度 = lng;
           });
-          points.value.push({ lat, lng });
+          points.value.push({ lat, lng, address });
         } else {
           logs.value.push({
             address,
@@ -1078,7 +1082,7 @@ const startGeocode = async () => {
         rows.value[rowIndex].纬度 = result.lat;
         rows.value[rowIndex].经度 = result.lng;
       });
-      points.value.push({ lat: result.lat, lng: result.lng });
+      points.value.push({ lat: result.lat, lng: result.lng, address });
     } else {
       logs.value.push({
         address,
@@ -1129,7 +1133,15 @@ const startReverseGeocode = async () => {
       row.一级行政区 = result.admin1;
       row.二级行政区 = result.admin2;
       row.三级行政区 = result.admin3;
-      points.value.push({ lat, lng, type: "point" });
+      points.value.push({
+        lat,
+        lng,
+        type: "point",
+        address: result.address,
+        admin1: result.admin1,
+        admin2: result.admin2,
+        admin3: result.admin3,
+      });
     } else {
       logs.value.push({
         address: parsed.key,
@@ -1232,9 +1244,23 @@ const startRoute = async () => {
       if (result.success) {
         row["导航距离(km)"] = result.distanceKm;
         row["导航时间(min)"] = result.durationMin;
+        routeSummary.value = {
+          distanceKm: result.distanceKm,
+          durationMin: result.durationMin,
+        };
         points.value.push(
-          { lat: parsedOrigin.lat, lng: parsedOrigin.lng, type: "origin" },
-          { lat: parsedDestination.lat, lng: parsedDestination.lng, type: "destination" }
+          {
+            lat: parsedOrigin.lat,
+            lng: parsedOrigin.lng,
+            type: "origin",
+            label: "起点",
+          },
+          {
+            lat: parsedDestination.lat,
+            lng: parsedDestination.lng,
+            type: "destination",
+            label: "终点",
+          }
         );
         routeLine.value = result.line;
       } else {
@@ -1277,9 +1303,25 @@ const startRoute = async () => {
     if (result.success) {
       row["导航距离(km)"] = result.distanceKm;
       row["导航时间(min)"] = result.durationMin;
+      routeSummary.value = {
+        distanceKm: result.distanceKm,
+        durationMin: result.durationMin,
+      };
       points.value.push(
-        { lat: result.origin.lat, lng: result.origin.lng, type: "origin" },
-        { lat: result.destination.lat, lng: result.destination.lng, type: "destination" }
+        {
+          lat: result.origin.lat,
+          lng: result.origin.lng,
+          type: "origin",
+          label: "起点",
+          address: origin,
+        },
+        {
+          lat: result.destination.lat,
+          lng: result.destination.lng,
+          type: "destination",
+          label: "终点",
+          address: destination,
+        }
       );
       routeLine.value = result.line;
     } else {
@@ -1801,6 +1843,15 @@ const refreshMarkers = () => {
     const marker = new mapboxgl.Marker({ color })
       .setLngLat([point.lng, point.lat])
       .addTo(mapInstance);
+    const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 12 })
+      .setHTML(buildPointPopupContent(point));
+    const markerElement = marker.getElement();
+    markerElement.addEventListener("mouseenter", () => {
+      popup.addTo(mapInstance);
+    });
+    markerElement.addEventListener("mouseleave", () => {
+      popup.remove();
+    });
     mapMarkers.push(marker);
     bounds.extend([point.lng, point.lat]);
   });
@@ -1815,6 +1866,15 @@ const refreshMarkers = () => {
 const updateRouteLayer = () => {
   if (!mapInstance) return;
   const sourceId = "route-line";
+  if (routeHoverHandlers) {
+    mapInstance.off("mouseenter", sourceId, routeHoverHandlers.enter);
+    mapInstance.off("mouseleave", sourceId, routeHoverHandlers.leave);
+    mapInstance.off("mousemove", sourceId, routeHoverHandlers.move);
+    routeHoverHandlers = null;
+  }
+  if (routePopup) {
+    routePopup.remove();
+  }
   if (mapInstance.getLayer(sourceId)) {
     mapInstance.removeLayer(sourceId);
   }
@@ -1842,7 +1902,64 @@ const updateRouteLayer = () => {
         "line-width": 4,
       },
     });
+    attachRouteHover(sourceId);
   }
+};
+
+const attachRouteHover = (sourceId) => {
+  if (!mapInstance) return;
+  routePopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 12 });
+  const buildRouteContent = () => {
+    if (!routeSummary.value) {
+      return "<div class=\"map-popup\"><p>暂无可用路线信息</p></div>";
+    }
+    return `
+      <div class="map-popup">
+        <p><strong>导航距离：</strong>${routeSummary.value.distanceKm} km</p>
+        <p><strong>导航时间：</strong>${routeSummary.value.durationMin} min</p>
+      </div>
+    `;
+  };
+  const enter = (event) => {
+    mapInstance.getCanvas().style.cursor = "pointer";
+    routePopup
+      .setLngLat(event.lngLat)
+      .setHTML(buildRouteContent())
+      .addTo(mapInstance);
+  };
+  const move = (event) => {
+    routePopup.setLngLat(event.lngLat);
+  };
+  const leave = () => {
+    mapInstance.getCanvas().style.cursor = "";
+    routePopup.remove();
+  };
+  routeHoverHandlers = { enter, leave, move };
+  mapInstance.on("mouseenter", sourceId, enter);
+  mapInstance.on("mousemove", sourceId, move);
+  mapInstance.on("mouseleave", sourceId, leave);
+};
+
+const formatCoordinate = (value) => {
+  if (!Number.isFinite(value)) return "-";
+  return Number(value).toFixed(6);
+};
+
+const buildPointPopupContent = (point) => {
+  const title = point.label || point.address || "位置点";
+  const addressLine = point.address ? `<p><strong>地址：</strong>${point.address}</p>` : "";
+  const adminParts = [point.admin1, point.admin2, point.admin3].filter(Boolean);
+  const adminLine = adminParts.length
+    ? `<p><strong>行政区：</strong>${adminParts.join(" / ")}</p>`
+    : "";
+  return `
+    <div class="map-popup">
+      <p><strong>${title}</strong></p>
+      ${addressLine}
+      ${adminLine}
+      <p><strong>经纬度：</strong>${formatCoordinate(point.lat)}, ${formatCoordinate(point.lng)}</p>
+    </div>
+  `;
 };
 
 const exportSettings = () => {
