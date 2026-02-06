@@ -61,7 +61,9 @@ async def geocode_address(session, token, config, address):
 
 
 async def handle_connection(websocket):
+    print("client connected:", websocket.remote_address)
     async for message in websocket:
+        print("recv:", message)
         try:
             payload = json.loads(message)
         except json.JSONDecodeError:
