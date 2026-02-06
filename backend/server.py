@@ -182,6 +182,8 @@ async def handle_connection(websocket):
                 for index, route in enumerate(routes, start=1):
                     origin_value = route.get("origin")
                     destination_value = route.get("destination")
+                    origin_coords = None
+                    destination_coords = None
                     if route_input_mode == "address":
                         origin_result = await geocode_address(session, token, config, origin_value)
                         destination_result = await geocode_address(
@@ -198,10 +200,16 @@ async def handle_connection(websocket):
                                 "response": failure.get("response", "地址无法转换为经纬度"),
                             }
                         else:
-                            origin_value = f"{origin_result.get('lat')},{origin_result.get('lng')}"
-                            destination_value = (
-                                f"{destination_result.get('lat')},{destination_result.get('lng')}"
+                            origin_coords = (
+                                origin_result.get("lat"),
+                                origin_result.get("lng"),
                             )
+                            destination_coords = (
+                                destination_result.get("lat"),
+                                destination_result.get("lng"),
+                            )
+                            origin_value = f"{origin_coords[0]},{origin_coords[1]}"
+                            destination_value = f"{destination_coords[0]},{destination_coords[1]}"
                             result = await fetch_route(
                                 session, token, config, origin_value, destination_value
                             )
@@ -233,6 +241,14 @@ async def handle_connection(websocket):
                                     "errorType": result.get("errorType"),
                                     "request": result.get("request"),
                                     "response": result.get("response"),
+                                    "originLat": origin_coords[0] if origin_coords else None,
+                                    "originLng": origin_coords[1] if origin_coords else None,
+                                    "destinationLat": destination_coords[0]
+                                    if destination_coords
+                                    else None,
+                                    "destinationLng": destination_coords[1]
+                                    if destination_coords
+                                    else None,
                                     "index": index - 1,
                                 },
                             },
