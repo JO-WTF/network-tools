@@ -487,7 +487,12 @@ const canStart = computed(() => {
   );
 });
 
-const canDownload = computed(() => rows.value.length > 0 && points.value.length > 0);
+const canDownload = computed(() => {
+  if (mode.value === "route") {
+    return rows.value.length > 0;
+  }
+  return rows.value.length > 0 && points.value.length > 0;
+});
 const hasData = computed(() => rows.value.length > 0);
 const headerTitle = computed(() => {
   if (mode.value === "reverse") {
