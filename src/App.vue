@@ -1011,6 +1011,40 @@ const startCustomRoute = () => {
         if (distanceKm != null && durationMin != null) {
           rows.value[route.index]["导航距离(km)"] = distanceKm;
           rows.value[route.index]["导航时间(min)"] = durationMin;
+          routeSummary.value = {
+            distanceKm,
+            durationMin,
+          };
+          const originLat = Number(payload.originLat);
+          const originLng = Number(payload.originLng);
+          const destinationLat = Number(payload.destinationLat);
+          const destinationLng = Number(payload.destinationLng);
+          if (
+            Number.isFinite(originLat) &&
+            Number.isFinite(originLng) &&
+            Number.isFinite(destinationLat) &&
+            Number.isFinite(destinationLng)
+          ) {
+            const displayMode = routeInputMode.value === "coordinate" ? "coordinate-only" : "full";
+            points.value.push(
+              {
+                lat: originLat,
+                lng: originLng,
+                type: "origin",
+                label: "起点",
+                address: route.origin,
+                displayMode,
+              },
+              {
+                lat: destinationLat,
+                lng: destinationLng,
+                type: "destination",
+                label: "终点",
+                address: route.destination,
+                displayMode,
+              }
+            );
+          }
         } else {
           logs.value.push({
             address,
