@@ -477,6 +477,19 @@ button:not(:disabled):hover {
   width: 100%;
 }
 
+.map-popup {
+  font-size: 12px;
+  color: #0f172a;
+}
+
+.map-popup p {
+  margin: 4px 0;
+}
+
+.map-popup strong {
+  font-weight: 600;
+}
+
 .map-config {
   position: absolute;
   right: 16px;
