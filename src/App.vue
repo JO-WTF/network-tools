@@ -148,6 +148,19 @@
             </template>
           </div>
           <div v-else>
+            <div class="field">
+              <span>路线输入类型</span>
+              <div class="option-row">
+                <label class="option-pill">
+                  <input v-model="routeInputMode" type="radio" value="address" />
+                  <span>地址</span>
+                </label>
+                <label class="option-pill">
+                  <input v-model="routeInputMode" type="radio" value="coordinate" />
+                  <span>经纬度</span>
+                </label>
+              </div>
+            </div>
             <label class="field">
               <span>起始地列名</span>
               <select v-model="startColumnName">
@@ -292,6 +305,7 @@ const reverseDelimiterMode = ref("auto");
 const reverseDelimiter = ref(",");
 const startColumnName = ref("");
 const endColumnName = ref("");
+const routeInputMode = ref("address");
 const provider = ref("mapbox");
 const providerApiKey = ref("");
 const customAppId = ref("");
@@ -356,6 +370,7 @@ const storageKeys = {
   reverseDelimiter: "reverse_delimiter",
   startColumnName: "route_start_column_name",
   endColumnName: "route_end_column_name",
+  routeInputMode: "route_input_mode",
   mode: "geocode_mode",
 };
 
@@ -375,6 +390,7 @@ const canStart = computed(() => {
         customAppId.value &&
           customCredential.value &&
           customTokenUrl.value &&
+          (routeInputMode.value === "address" ? customGeocodeUrl.value : true) &&
           customRouteUrl.value &&
           customWebSocketUrl.value &&
           startColumnName.value &&
@@ -525,14 +541,18 @@ const loadFile = (file) => {
     } else {
       startColumnName.value = headers.value[0] || "";
     }
-    const savedEndColumn = localStorage.getItem(storageKeys.endColumnName);
-    if (savedEndColumn && headers.value.includes(savedEndColumn)) {
-      endColumnName.value = savedEndColumn;
-    } else {
-      endColumnName.value = headers.value[1] || headers.value[0] || "";
-    }
-    resetResults();
-  };
+  const savedEndColumn = localStorage.getItem(storageKeys.endColumnName);
+  if (savedEndColumn && headers.value.includes(savedEndColumn)) {
+    endColumnName.value = savedEndColumn;
+  } else {
+    endColumnName.value = headers.value[1] || headers.value[0] || "";
+  }
+  const savedRouteInputMode = localStorage.getItem(storageKeys.routeInputMode);
+  if (savedRouteInputMode === "address" || savedRouteInputMode === "coordinate") {
+    routeInputMode.value = savedRouteInputMode;
+  }
+  resetResults();
+};
   reader.readAsArrayBuffer(file);
 };
 
@@ -656,6 +676,27 @@ const buildRoutePayloads = () =>
     const destination = String(row[endColumnName.value] ?? "").trim();
     return { index, origin, destination };
   });
+
+const parseRouteCoordinate = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return { success: false, key: "-", message: "坐标为空" };
+  }
+  const delimiter = raw.includes(",") ? "," : raw.includes("，") ? "，" : "";
+  if (!delimiter) {
+    return { success: false, key: raw, message: "无法识别坐标分隔符" };
+  }
+  const parts = raw.split(delimiter).map((item) => item.trim());
+  if (parts.length < 2) {
+    return { success: false, key: raw, message: "坐标格式不完整" };
+  }
+  const lat = Number(parts[0]);
+  const lng = Number(parts[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return { success: false, key: raw, message: "纬度或经度不是有效数字" };
+  }
+  return { success: true, key: raw, lat, lng };
+};
 
 const closeCustomSocket = () => {
   if (customSocket.value) {
@@ -833,10 +874,12 @@ const startCustomRoute = () => {
         type: "start",
         payload: {
           mode: "route",
+          routeInputMode: routeInputMode.value,
           config: {
             appId: customAppId.value,
             credential: customCredential.value,
             tokenUrl: customTokenUrl.value,
+            geocodeUrl: customGeocodeUrl.value,
             routeUrl: customRouteUrl.value,
           },
           routes: routes.map((route) => ({
@@ -1075,6 +1118,49 @@ const startRoute = async () => {
         response: "起始地或目的地为空",
       });
       geocodeState.processed += 1;
+      continue;
+    }
+
+    if (routeInputMode.value === "coordinate") {
+      const parsedOrigin = parseRouteCoordinate(origin);
+      const parsedDestination = parseRouteCoordinate(destination);
+      if (!parsedOrigin.success || !parsedDestination.success) {
+        logs.value.push({
+          address: routeKey,
+          type: "invalid",
+          request: "输入格式错误",
+          response: `${parsedOrigin.message || ""} ${parsedDestination.message || ""}`.trim(),
+        });
+        geocodeState.processed += 1;
+        continue;
+      }
+      let result = routeCache.get(routeKey);
+      if (!result) {
+        result = await fetchRoute(
+          parsedOrigin.lat,
+          parsedOrigin.lng,
+          parsedDestination.lat,
+          parsedDestination.lng
+        );
+        routeCache.set(routeKey, result);
+      }
+      geocodeState.processed += 1;
+      if (result.success) {
+        row["导航距离(km)"] = result.distanceKm;
+        row["导航时间(min)"] = result.durationMin;
+        points.value.push(
+          { lat: parsedOrigin.lat, lng: parsedOrigin.lng, type: "origin" },
+          { lat: parsedDestination.lat, lng: parsedDestination.lng, type: "destination" }
+        );
+        routeLine.value = result.line;
+      } else {
+        logs.value.push({
+          address: routeKey,
+          type: result.type,
+          request: result.request,
+          response: result.response,
+        });
+      }
       continue;
     }
     let result = routeCache.get(routeKey);
@@ -1731,6 +1817,10 @@ onMounted(() => {
   if (savedDelimiter) {
     reverseDelimiter.value = savedDelimiter;
   }
+  const savedRouteInputMode = localStorage.getItem(storageKeys.routeInputMode);
+  if (savedRouteInputMode === "address" || savedRouteInputMode === "coordinate") {
+    routeInputMode.value = savedRouteInputMode;
+  }
   const savedKey = localStorage.getItem(storageKeys.mapboxMap);
   if (savedKey) {
     mapApiKey.value = savedKey;
@@ -1882,6 +1972,14 @@ watch(endColumnName, (value) => {
     localStorage.setItem(storageKeys.endColumnName, value);
   } else {
     localStorage.removeItem(storageKeys.endColumnName);
+  }
+});
+
+watch(routeInputMode, (value) => {
+  if (value) {
+    localStorage.setItem(storageKeys.routeInputMode, value);
+  } else {
+    localStorage.removeItem(storageKeys.routeInputMode);
   }
 });
 

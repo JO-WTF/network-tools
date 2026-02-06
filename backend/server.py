@@ -104,6 +104,24 @@ async def fetch_route(session, token, config, origin, destination):
         }
 
 
+def parse_coordinate(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    delimiter = "," if "," in raw else "，" if "，" in raw else None
+    if not delimiter:
+        return None
+    parts = [item.strip() for item in raw.split(delimiter)]
+    if len(parts) < 2:
+        return None
+    try:
+        lat = float(parts[0])
+        lng = float(parts[1])
+    except ValueError:
+        return None
+    return lat, lng
+
+
 async def handle_connection(websocket):
     print("client connected:", websocket.remote_address)
     async for message in websocket:
@@ -131,6 +149,7 @@ async def handle_connection(websocket):
 
         payload_data = payload.get("payload", {})
         mode = payload_data.get("mode", "geocode")
+        route_input_mode = payload_data.get("routeInputMode", "address")
         config = payload_data.get("config", {})
         addresses = payload_data.get("addresses", [])
         routes = payload_data.get("routes", [])
@@ -161,9 +180,47 @@ async def handle_connection(websocket):
 
             if mode == "route":
                 for index, route in enumerate(routes, start=1):
-                    result = await fetch_route(
-                        session, token, config, route.get("origin"), route.get("destination")
-                    )
+                    origin_value = route.get("origin")
+                    destination_value = route.get("destination")
+                    if route_input_mode == "address":
+                        origin_result = await geocode_address(session, token, config, origin_value)
+                        destination_result = await geocode_address(
+                            session, token, config, destination_value
+                        )
+                        if not origin_result.get("success") or not destination_result.get("success"):
+                            failure = (
+                                origin_result if not origin_result.get("success") else destination_result
+                            )
+                            result = {
+                                "success": False,
+                                "errorType": failure.get("errorType", "no_result"),
+                                "request": failure.get("request", "geocode"),
+                                "response": failure.get("response", "地址无法转换为经纬度"),
+                            }
+                        else:
+                            origin_value = f"{origin_result.get('lat')},{origin_result.get('lng')}"
+                            destination_value = (
+                                f"{destination_result.get('lat')},{destination_result.get('lng')}"
+                            )
+                            result = await fetch_route(
+                                session, token, config, origin_value, destination_value
+                            )
+                    else:
+                        origin_coords = parse_coordinate(origin_value)
+                        destination_coords = parse_coordinate(destination_value)
+                        if not origin_coords or not destination_coords:
+                            result = {
+                                "success": False,
+                                "errorType": "invalid",
+                                "request": "coordinate",
+                                "response": "坐标格式错误",
+                            }
+                        else:
+                            origin_value = f"{origin_coords[0]},{origin_coords[1]}"
+                            destination_value = f"{destination_coords[0]},{destination_coords[1]}"
+                            result = await fetch_route(
+                                session, token, config, origin_value, destination_value
+                            )
                     await websocket.send(
                         json.dumps(
                             {
