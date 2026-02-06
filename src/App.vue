@@ -5,18 +5,32 @@
         <h1>{{ headerTitle }}</h1>
         <p class="sub-title">支持地址编码、经纬度解码、导航距离计算三种批量处理方式。</p>
       </div>
-      <div class="mode-toggle" role="tablist" aria-label="功能切换">
+      <div class="header-controls">
+        <div class="mode-toggle" role="tablist" aria-label="功能切换">
+          <button
+            v-for="item in modeOptions"
+            :key="item.value"
+            type="button"
+            class="mode-button"
+            :class="{ active: mode === item.value }"
+            role="tab"
+            :aria-selected="mode === item.value"
+            @click="mode = item.value"
+          >
+            {{ item.label }}
+          </button>
+        </div>
         <button
-          v-for="item in modeOptions"
-          :key="item.value"
+          class="icon-button settings-button"
           type="button"
-          class="mode-button"
-          :class="{ active: mode === item.value }"
-          role="tab"
-          :aria-selected="mode === item.value"
-          @click="mode = item.value"
+          @click="showSettings = true"
+          aria-label="打开设置"
         >
-          {{ item.label }}
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Zm8.94 3.5a7.2 7.2 0 0 0-.12-1.3l2.02-1.58-2-3.46-2.44.78a7.53 7.53 0 0 0-2.26-1.3l-.5-2.5h-4l-.5 2.5a7.53 7.53 0 0 0-2.26 1.3l-2.44-.78-2 3.46 2.02 1.58a7.2 7.2 0 0 0 0 2.6L2.44 13.6l2 3.46 2.44-.78a7.53 7.53 0 0 0 2.26 1.3l.5 2.5h4l.5-2.5a7.53 7.53 0 0 0 2.26-1.3l2.44.78 2-3.46-2.02-1.58c.08-.42.12-.86.12-1.3Z"
+            />
+          </svg>
         </button>
       </div>
     </header>
@@ -189,36 +203,7 @@
             </select>
           </label>
           <p v-if="mode === 'reverse'" class="hint">自定义接口暂不支持反编码。</p>
-          <template v-if="provider === 'custom'">
-            <label class="field">
-              <span>App ID</span>
-              <input v-model="customAppId" type="text" placeholder="输入 App ID" />
-            </label>
-            <label class="field">
-              <span>Credential</span>
-              <input v-model="customCredential" type="password" placeholder="输入 Credential" />
-            </label>
-            <label class="field">
-              <span>Token 接口 URL</span>
-              <input v-model="customTokenUrl" type="text" placeholder="getResAppDynamicToken 接口地址" />
-            </label>
-            <label class="field">
-              <span>地理编码接口 URL</span>
-              <input v-model="customGeocodeUrl" type="text" placeholder="geographicSearch 接口地址" />
-            </label>
-            <label v-if="mode === 'route'" class="field">
-              <span>导航接口 URL</span>
-              <input v-model="customRouteUrl" type="text" placeholder="routeSearch 接口地址" />
-            </label>
-            <label class="field">
-              <span>WebSocket 地址</span>
-              <input v-model="customWebSocketUrl" type="text" placeholder="ws://localhost:8765" />
-            </label>
-          </template>
-          <label v-else class="field">
-            <span>API Key</span>
-            <input v-model="providerApiKey" type="password" placeholder="输入服务商 API Key" />
-          </label>
+          <p class="hint">服务商密钥与接口地址请在右上角设置中填写。</p>
           <div class="actions">
             <button class="primary" :disabled="!canStart" @click="handleStart">
               {{ startLabel }}
@@ -273,18 +258,73 @@
           <div ref="mapContainer" class="map"></div>
           <div v-if="!mapLoaded" class="map-config">
             <h3>地图配置</h3>
-            <label>
-              <span>Mapbox API Key</span>
-              <input v-model="mapApiKey" type="password" placeholder="用于地图展示" />
-            </label>
-            <button class="secondary" @click="applyMapKey">应用</button>
+            <p class="hint">请在设置中填写 Mapbox API Key。</p>
+            <button class="secondary" @click="showSettings = true">打开设置</button>
           </div>
           <div v-if="!mapLoaded" class="map-empty">
-            <p>请在右下角填写 Mapbox API Key 以加载地图。</p>
+            <p>请在设置中填写 Mapbox API Key 以加载地图。</p>
           </div>
         </div>
       </section>
     </main>
+
+    <div v-if="showSettings" class="settings-backdrop" @click.self="showSettings = false">
+      <div class="settings-modal" role="dialog" aria-modal="true" aria-label="设置">
+        <div class="settings-header">
+          <h2>设置</h2>
+          <button class="icon-button" type="button" @click="showSettings = false" aria-label="关闭">
+            ✕
+          </button>
+        </div>
+        <div class="settings-body">
+          <div class="settings-section">
+            <h3>服务商密钥</h3>
+            <label class="field">
+              <span>Mapbox API Key</span>
+              <input v-model="mapboxGeocodeApiKey" type="password" placeholder="用于编码/反编码/导航" />
+            </label>
+            <label class="field">
+              <span>HERE API Key</span>
+              <input v-model="hereGeocodeApiKey" type="password" placeholder="用于编码/反编码/导航" />
+            </label>
+          </div>
+          <div class="settings-section">
+            <h3>自定义接口</h3>
+            <label class="field">
+              <span>App ID</span>
+              <input v-model="customAppId" type="text" placeholder="输入 App ID" />
+            </label>
+            <label class="field">
+              <span>Credential</span>
+              <input v-model="customCredential" type="password" placeholder="输入 Credential" />
+            </label>
+            <label class="field">
+              <span>Token 接口 URL</span>
+              <input v-model="customTokenUrl" type="text" placeholder="getResAppDynamicToken 接口地址" />
+            </label>
+            <label class="field">
+              <span>地理编码接口 URL</span>
+              <input v-model="customGeocodeUrl" type="text" placeholder="geographicSearch 接口地址" />
+            </label>
+            <label class="field">
+              <span>导航接口 URL</span>
+              <input v-model="customRouteUrl" type="text" placeholder="routeSearch 接口地址" />
+            </label>
+            <label class="field">
+              <span>WebSocket 地址</span>
+              <input v-model="customWebSocketUrl" type="text" placeholder="ws://localhost:8765" />
+            </label>
+          </div>
+          <div class="settings-section">
+            <h3>地图展示</h3>
+            <label class="field">
+              <span>Mapbox API Key</span>
+              <input v-model="mapApiKey" type="password" placeholder="用于地图展示" />
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -308,6 +348,8 @@ const endColumnName = ref("");
 const routeInputMode = ref("address");
 const provider = ref("mapbox");
 const providerApiKey = ref("");
+const mapboxGeocodeApiKey = ref("");
+const hereGeocodeApiKey = ref("");
 const customAppId = ref("");
 const customCredential = ref("");
 const customTokenUrl = ref("");
@@ -323,6 +365,7 @@ const customWebSocketUrl = ref(defaultWebSocketUrl());
 const customSocket = ref(null);
 const mapApiKey = ref("");
 const logs = ref([]);
+const showSettings = ref(false);
 const geocodeCache = new Map();
 const reverseCache = new Map();
 const routeCache = new Map();
@@ -1816,6 +1859,18 @@ onMounted(() => {
       providerApiKey.value = savedProviderKey;
     }
   }
+  const savedMapboxKey = localStorage.getItem(storageKeys.mapboxGeocode);
+  if (savedMapboxKey) {
+    mapboxGeocodeApiKey.value = savedMapboxKey;
+  }
+  const savedHereKey = localStorage.getItem(storageKeys.hereGeocode);
+  if (savedHereKey) {
+    hereGeocodeApiKey.value = savedHereKey;
+  }
+  if (provider.value !== "custom") {
+    providerApiKey.value =
+      provider.value === "mapbox" ? mapboxGeocodeApiKey.value : hereGeocodeApiKey.value;
+  }
   const savedReverseMode = localStorage.getItem(storageKeys.reverseColumnMode);
   if (savedReverseMode === "single" || savedReverseMode === "separate") {
     reverseColumnMode.value = savedReverseMode;
@@ -1850,20 +1905,30 @@ watch(provider, (value) => {
   if (value === "custom") {
     providerApiKey.value = "";
   } else {
-    const savedKey = localStorage.getItem(getProviderStorageKey(value));
-    providerApiKey.value = savedKey || "";
+    providerApiKey.value =
+      value === "mapbox" ? mapboxGeocodeApiKey.value || "" : hereGeocodeApiKey.value || "";
   }
 });
 
-watch(providerApiKey, (value) => {
-  if (provider.value === "custom") {
-    return;
-  }
-  const key = getProviderStorageKey(provider.value);
+watch(mapboxGeocodeApiKey, (value) => {
   if (value) {
-    localStorage.setItem(key, value);
+    localStorage.setItem(storageKeys.mapboxGeocode, value);
   } else {
-    localStorage.removeItem(key);
+    localStorage.removeItem(storageKeys.mapboxGeocode);
+  }
+  if (provider.value === "mapbox") {
+    providerApiKey.value = value || "";
+  }
+});
+
+watch(hereGeocodeApiKey, (value) => {
+  if (value) {
+    localStorage.setItem(storageKeys.hereGeocode, value);
+  } else {
+    localStorage.removeItem(storageKeys.hereGeocode);
+  }
+  if (provider.value === "here") {
+    providerApiKey.value = value || "";
   }
 });
 
