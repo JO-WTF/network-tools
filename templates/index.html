@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel">
+  <div class="card">
+    <h2>1. 上传 Excel</h2>
+    <form action="{{ url_for('upload_excel') }}" method="post" enctype="multipart/form-data" class="upload-form">
+      <label class="file-field">
+        <span>选择文件</span>
+        <input type="file" name="excel_file" accept=".xlsx,.xls" required />
+      </label>
+      <button type="submit" class="primary">解析列名</button>
+    </form>
+    <p class="hint">上传后进入配置页面进行批量处理。</p>
+  </div>
+  <div class="card">
+    <h2>使用说明</h2>
+    <ul class="tips">
+      <li>支持地址编码（地址 → 经纬度）、经纬度解码（坐标 → 地址）和导航距离计算。</li>
+      <li>地址与坐标需保证格式规范，建议先用少量数据测试。</li>
+      <li>路线计算会先进行起终点地址解析，再调用地图服务计算距离。</li>
+    </ul>
+  </div>
+</section>
+{% endblock %}
