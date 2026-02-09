@@ -189,6 +189,16 @@ async def handle_connection(websocket):
                         destination_result = await geocode_address(
                             session, token, config, destination_value
                         )
+                        if origin_result.get("success"):
+                            origin_coords = (
+                                origin_result.get("lat"),
+                                origin_result.get("lng"),
+                            )
+                        if destination_result.get("success"):
+                            destination_coords = (
+                                destination_result.get("lat"),
+                                destination_result.get("lng"),
+                            )
                         if not origin_result.get("success") or not destination_result.get("success"):
                             failure = (
                                 origin_result if not origin_result.get("success") else destination_result
@@ -197,17 +207,9 @@ async def handle_connection(websocket):
                                 "success": False,
                                 "errorType": failure.get("errorType", "no_result"),
                                 "request": failure.get("request", "geocode"),
-                                "response": failure.get("response", "地址无法转换为经纬度"),
+                            "response": failure.get("response", "地址无法转换为经纬度"),
                             }
                         else:
-                            origin_coords = (
-                                origin_result.get("lat"),
-                                origin_result.get("lng"),
-                            )
-                            destination_coords = (
-                                destination_result.get("lat"),
-                                destination_result.get("lng"),
-                            )
                             origin_value = f"{origin_coords[0]},{origin_coords[1]}"
                             destination_value = f"{destination_coords[0]},{destination_coords[1]}"
                             result = await fetch_route(
