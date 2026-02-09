@@ -1015,10 +1015,30 @@ const startCustomRoute = () => {
             distanceKm,
             durationMin,
           };
-          const originLat = Number(payload.originLat);
-          const originLng = Number(payload.originLng);
-          const destinationLat = Number(payload.destinationLat);
-          const destinationLng = Number(payload.destinationLng);
+          let originLat = Number(payload.originLat);
+          let originLng = Number(payload.originLng);
+          let destinationLat = Number(payload.destinationLat);
+          let destinationLng = Number(payload.destinationLng);
+          if (
+            routeInputMode.value === "coordinate" &&
+            (!Number.isFinite(originLat) || !Number.isFinite(originLng))
+          ) {
+            const parsedOrigin = parseRouteCoordinate(route.origin);
+            if (parsedOrigin.success) {
+              originLat = parsedOrigin.lat;
+              originLng = parsedOrigin.lng;
+            }
+          }
+          if (
+            routeInputMode.value === "coordinate" &&
+            (!Number.isFinite(destinationLat) || !Number.isFinite(destinationLng))
+          ) {
+            const parsedDestination = parseRouteCoordinate(route.destination);
+            if (parsedDestination.success) {
+              destinationLat = parsedDestination.lat;
+              destinationLng = parsedDestination.lng;
+            }
+          }
           if (
             Number.isFinite(originLat) &&
             Number.isFinite(originLng) &&
