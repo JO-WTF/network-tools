@@ -1044,6 +1044,14 @@ const startCustomRoute = () => {
                 displayMode,
               }
             );
+            routeLine.value = {
+              type: "LineString",
+              coordinates: [
+                [originLng, originLat],
+                [destinationLng, destinationLat],
+              ],
+            };
+            refreshMarkers();
           }
         } else {
           logs.value.push({
