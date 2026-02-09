@@ -399,8 +399,7 @@ const geocodeState = reactive({
   running: false,
 });
 const points = ref([]);
-const routeLine = ref(null);
-const routeSummary = ref(null);
+const routeLines = ref([]);
 const mode = ref("geocode");
 
 const modeOptions = [
@@ -559,8 +558,7 @@ const resetFileData = () => {
 const resetResults = () => {
   logs.value = [];
   points.value = [];
-  routeLine.value = null;
-  routeSummary.value = null;
+  routeLines.value = [];
   geocodeCache.clear();
   reverseCache.clear();
   routeCache.clear();
@@ -798,7 +796,7 @@ const startCustomGeocode = () => {
   closeCustomSocket();
   logs.value = [];
   points.value = [];
-  routeLine.value = null;
+  routeLines.value = [];
   geocodeState.running = true;
   geocodeState.processed = 0;
   geocodeState.current = "";
@@ -928,7 +926,7 @@ const startCustomRoute = () => {
   closeCustomSocket();
   logs.value = [];
   points.value = [];
-  routeLine.value = null;
+  routeLines.value = [];
   geocodeState.running = true;
   geocodeState.processed = 0;
   geocodeState.current = "";
@@ -1011,10 +1009,6 @@ const startCustomRoute = () => {
         if (distanceKm != null && durationMin != null) {
           rows.value[route.index]["导航距离(km)"] = distanceKm;
           rows.value[route.index]["导航时间(min)"] = durationMin;
-          routeSummary.value = {
-            distanceKm,
-            durationMin,
-          };
           let originLat = Number(payload.originLat);
           let originLng = Number(payload.originLng);
           let destinationLat = Number(payload.destinationLat);
@@ -1064,13 +1058,17 @@ const startCustomRoute = () => {
                 displayMode,
               }
             );
-            routeLine.value = {
-              type: "LineString",
-              coordinates: [
-                [originLng, originLat],
-                [destinationLng, destinationLat],
-              ],
-            };
+            routeLines.value.push({
+              distanceKm,
+              durationMin,
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [originLng, originLat],
+                  [destinationLng, destinationLat],
+                ],
+              },
+            });
             refreshMarkers();
           }
         } else {
@@ -1122,7 +1120,7 @@ const startGeocode = async () => {
   if (!canStart.value) return;
   logs.value = [];
   points.value = [];
-  routeLine.value = null;
+  routeLines.value = [];
   geocodeState.running = true;
   geocodeState.processed = 0;
   geocodeState.current = "";
@@ -1164,7 +1162,7 @@ const startReverseGeocode = async () => {
   if (!canStart.value) return;
   logs.value = [];
   points.value = [];
-  routeLine.value = null;
+  routeLines.value = [];
   geocodeState.running = true;
   geocodeState.processed = 0;
   geocodeState.current = "";
@@ -1257,7 +1255,7 @@ const startRoute = async () => {
   if (!canStart.value) return;
   logs.value = [];
   points.value = [];
-  routeLine.value = null;
+  routeLines.value = [];
   geocodeState.running = true;
   geocodeState.processed = 0;
   geocodeState.current = "";
@@ -1306,10 +1304,6 @@ const startRoute = async () => {
       if (result.success) {
         row["导航距离(km)"] = result.distanceKm;
         row["导航时间(min)"] = result.durationMin;
-        routeSummary.value = {
-          distanceKm: result.distanceKm,
-          durationMin: result.durationMin,
-        };
         points.value.push(
           {
             lat: parsedOrigin.lat,
@@ -1326,7 +1320,11 @@ const startRoute = async () => {
             displayMode: "coordinate-only",
           }
         );
-        routeLine.value = result.line;
+        routeLines.value.push({
+          distanceKm: result.distanceKm,
+          durationMin: result.durationMin,
+          geometry: result.line,
+        });
       } else {
         logs.value.push({
           address: routeKey,
@@ -1367,10 +1365,6 @@ const startRoute = async () => {
     if (result.success) {
       row["导航距离(km)"] = result.distanceKm;
       row["导航时间(min)"] = result.durationMin;
-      routeSummary.value = {
-        distanceKm: result.distanceKm,
-        durationMin: result.durationMin,
-      };
       points.value.push(
         {
           lat: result.origin.lat,
@@ -1389,7 +1383,11 @@ const startRoute = async () => {
           displayMode: "full",
         }
       );
-      routeLine.value = result.line;
+      routeLines.value.push({
+        distanceKm: result.distanceKm,
+        durationMin: result.durationMin,
+        geometry: result.line,
+      });
     } else {
       logs.value.push({
         address: routeKey,
@@ -1922,9 +1920,11 @@ const refreshMarkers = () => {
     mapMarkers.push(marker);
     bounds.extend([point.lng, point.lat]);
   });
-  if (routeLine.value?.coordinates?.length) {
-    routeLine.value.coordinates.forEach((coord) => bounds.extend(coord));
-  }
+  routeLines.value.forEach((line) => {
+    if (line.geometry?.coordinates?.length) {
+      line.geometry.coordinates.forEach((coord) => bounds.extend(coord));
+    }
+  });
   if (!bounds.isEmpty()) {
     mapInstance.fitBounds(bounds, { padding: 80, maxZoom: 13 });
   }
@@ -1948,12 +1948,19 @@ const updateRouteLayer = () => {
   if (mapInstance.getSource(sourceId)) {
     mapInstance.removeSource(sourceId);
   }
-  if (routeLine.value) {
+  if (routeLines.value.length) {
     mapInstance.addSource(sourceId, {
       type: "geojson",
       data: {
-        type: "Feature",
-        geometry: routeLine.value,
+        type: "FeatureCollection",
+        features: routeLines.value.map((line) => ({
+          type: "Feature",
+          properties: {
+            distanceKm: line.distanceKm ?? "",
+            durationMin: line.durationMin ?? "",
+          },
+          geometry: line.geometry,
+        })),
       },
     });
     mapInstance.addLayer({
@@ -1976,14 +1983,16 @@ const updateRouteLayer = () => {
 const attachRouteHover = (sourceId) => {
   if (!mapInstance) return;
   routePopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 12 });
-  const buildRouteContent = () => {
-    if (!routeSummary.value) {
+  const buildRouteContent = (feature) => {
+    const distanceKm = feature?.properties?.distanceKm;
+    const durationMin = feature?.properties?.durationMin;
+    if (!distanceKm && !durationMin) {
       return "<div class=\"map-popup\"><p>暂无可用路线信息</p></div>";
     }
     return `
       <div class="map-popup">
-        <p><strong>导航距离：</strong>${routeSummary.value.distanceKm} km</p>
-        <p><strong>导航时间：</strong>${routeSummary.value.durationMin} min</p>
+        <p><strong>导航距离：</strong>${distanceKm} km</p>
+        <p><strong>导航时间：</strong>${durationMin} min</p>
       </div>
     `;
   };
@@ -1991,7 +2000,7 @@ const attachRouteHover = (sourceId) => {
     mapInstance.getCanvas().style.cursor = "pointer";
     routePopup
       .setLngLat(event.lngLat)
-      .setHTML(buildRouteContent())
+      .setHTML(buildRouteContent(event.features?.[0]))
       .addTo(mapInstance);
   };
   const move = (event) => {
