@@ -3,6 +3,9 @@
     <div class="visual-top">
       <div ref="mapContainer" class="visual-map"></div>
       <div v-if="!mapReady" class="visual-map-empty">请输入设置中的 Mapbox 地图 Key 以启用可视化。</div>
+      <div v-if="isProcessing" class="visual-map-mask">
+        <div class="mask-card">正在处理数据并加载地图要素...</div>
+      </div>
     </div>
 
     <div class="visual-bottom">
@@ -32,10 +35,10 @@
       <div class="dataset-toolbar">
         <label class="secondary action-button upload-btn">
           上传文件
-          <input type="file" accept=".geojson,.json,.csv" @change="handleFileUpload" />
+          <input type="file" accept=".geojson,.json,.csv" @change="handleFileUpload" :disabled="isProcessing" />
         </label>
-        <button class="secondary action-button" type="button" @click="showPaste = !showPaste">粘贴数据</button>
-        <button class="secondary" type="button" @click="activateDrawPoint">地图绘制点</button>
+        <button class="secondary action-button" type="button" @click="showPaste = !showPaste" :disabled="isProcessing">粘贴数据</button>
+        <button class="secondary" type="button" @click="activateDrawPoint" :disabled="isProcessing">地图绘制点</button>
       </div>
 
       <div v-if="showPaste" class="paste-box">
@@ -44,7 +47,7 @@
           rows="4"
           placeholder="支持粘贴 geojson / csv / wkt (POINT, LINESTRING, POLYGON, MULTIPOLYGON)"
         />
-        <button class="primary" type="button" @click="handlePasteImport">解析并导入</button>
+        <button class="primary" type="button" @click="handlePasteImport" :disabled="isProcessing">解析并导入</button>
       </div>
 
       <div v-if="activeDataset" class="table-wrap">
@@ -92,6 +95,7 @@ const mapContainer = ref(null);
 const mapReady = ref(false);
 const showPaste = ref(false);
 const pasteInput = ref("");
+const isProcessing = ref(false);
 
 const datasets = ref([{ id: 1, name: "数据集 1", rows: [], extraColumns: [] }]);
 const activeDatasetId = ref(1);
@@ -552,16 +556,35 @@ const removeDataset = (datasetId) => {
   refreshSource();
 };
 
+const waitForMapFlush = async () => {
+  await nextTick();
+  await new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+};
+
+const importFeaturesWithMask = async (rawText) => {
+  if (!rawText) return;
+  isProcessing.value = true;
+  try {
+    const features = parseContentToFeatures(rawText);
+    appendRowsFromFeatures(features);
+    await waitForMapFlush();
+  } finally {
+    isProcessing.value = false;
+  }
+};
+
 const handleFileUpload = async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
   const text = await file.text();
-  appendRowsFromFeatures(parseContentToFeatures(text));
+  await importFeaturesWithMask(text);
   event.target.value = "";
 };
 
-const handlePasteImport = () => {
-  appendRowsFromFeatures(parseContentToFeatures(pasteInput.value));
+const handlePasteImport = async () => {
+  await importFeaturesWithMask(pasteInput.value);
   pasteInput.value = "";
 };
 
