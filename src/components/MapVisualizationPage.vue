@@ -60,7 +60,7 @@
                 <span class="geometry-badge">{{ row.geometryType }}</span>
               </td>
               <td v-for="col in activeDataset.extraColumns" :key="col">{{ row.properties[col] ?? '-' }}</td>
-              <td><button class="secondary small" type="button" @click="locateFeature(row.feature)">定位</button></td>
+              <td><button class="secondary small" type="button" @click="locateFeature(row.feature, row.gid)">定位</button></td>
               <td><button class="secondary small" type="button" @click="removeFeature(row.gid)">删除</button></td>
             </tr>
           </tbody>
@@ -86,11 +86,23 @@ const pasteInput = ref("");
 
 const datasets = ref([{ id: 1, name: "数据集 1", rows: [], features: [], extraColumns: [] }]);
 const activeDatasetId = ref(1);
+const highlightedGid = ref(null);
 
 let map = null;
 let drawPointMode = false;
 
 const activeDataset = computed(() => datasets.value.find((d) => d.id === activeDatasetId.value));
+
+const highlightFilter = () => ["==", ["coalesce", ["get", "__gid"], -1], highlightedGid.value ?? -1];
+
+const syncHighlightFilters = () => {
+  if (!mapReady.value || !map) return;
+  ["viz-highlight-fill", "viz-highlight-line", "viz-highlight-point"].forEach((layerId) => {
+    if (map.getLayer(layerId)) {
+      map.setFilter(layerId, highlightFilter());
+    }
+  });
+};
 
 const ensureMap = () => {
   if (!props.mapApiKey || !mapContainer.value || map) return;
@@ -112,6 +124,13 @@ const ensureMap = () => {
       paint: { "fill-color": "#2563eb", "fill-opacity": 0.2 },
     });
     map.addLayer({
+      id: "viz-polygon-outline",
+      type: "line",
+      source: "viz-source",
+      filter: ["==", ["geometry-type"], "Polygon"],
+      paint: { "line-color": "#1d4ed8", "line-width": 1 },
+    });
+    map.addLayer({
       id: "viz-line",
       type: "line",
       source: "viz-source",
@@ -123,7 +142,38 @@ const ensureMap = () => {
       type: "circle",
       source: "viz-source",
       filter: ["==", ["geometry-type"], "Point"],
-      paint: { "circle-color": "#f97316", "circle-radius": 6 },
+      paint: {
+        "circle-color": "#f97316",
+        "circle-radius": 6,
+        "circle-stroke-color": "#fff",
+        "circle-stroke-width": 1,
+      },
+    });
+    map.addLayer({
+      id: "viz-highlight-fill",
+      type: "fill",
+      source: "viz-source",
+      filter: highlightFilter(),
+      paint: { "fill-color": "#fde047", "fill-opacity": 0.35 },
+    });
+    map.addLayer({
+      id: "viz-highlight-line",
+      type: "line",
+      source: "viz-source",
+      filter: highlightFilter(),
+      paint: { "line-color": "#f59e0b", "line-width": 4 },
+    });
+    map.addLayer({
+      id: "viz-highlight-point",
+      type: "circle",
+      source: "viz-source",
+      filter: highlightFilter(),
+      paint: {
+        "circle-color": "#f59e0b",
+        "circle-radius": 8,
+        "circle-stroke-color": "#fff",
+        "circle-stroke-width": 2,
+      },
     });
     map.on("click", (event) => {
       if (!drawPointMode) return;
@@ -323,12 +373,22 @@ const parseContentToFeatures = (text) => {
 const appendRowsFromFeatures = (features) => {
   if (!activeDataset.value) return;
   const start = activeDataset.value.rows.length + 1;
-  const nextRows = features.map((feature, index) => ({
-    gid: start + index,
-    geometryType: feature.geometry?.type || "Unknown",
-    properties: feature.properties || {},
-    feature,
-  }));
+  const nextRows = features.map((feature, index) => {
+    const gid = start + index;
+    const normalizedFeature = {
+      ...feature,
+      properties: {
+        ...(feature.properties || {}),
+        __gid: gid,
+      },
+    };
+    return {
+      gid,
+      geometryType: normalizedFeature.geometry?.type || "Unknown",
+      properties: normalizedFeature.properties || {},
+      feature: normalizedFeature,
+    };
+  });
   const extraColumns = new Set(activeDataset.value.extraColumns);
   nextRows.forEach((row) => {
     Object.keys(row.properties || {}).forEach((key) => {
@@ -370,6 +430,8 @@ const handlePasteImport = () => {
 
 const locateFeature = (feature) => {
   if (!mapReady.value || !feature?.geometry) return;
+  highlightedGid.value = feature?.properties?.__gid ?? null;
+  syncHighlightFilters();
   const g = feature.geometry;
   if (g.type === "Point") {
     map.flyTo({ center: g.coordinates, zoom: 12 });
@@ -392,6 +454,10 @@ const locateFeature = (feature) => {
 const removeFeature = (gid) => {
   if (!activeDataset.value) return;
   activeDataset.value.rows = activeDataset.value.rows.filter((row) => row.gid !== gid);
+  if (highlightedGid.value === gid) {
+    highlightedGid.value = null;
+    syncHighlightFilters();
+  }
   refreshSource();
 };
 
@@ -409,6 +475,10 @@ watch(
     ensureMap();
   }
 );
+
+watch(highlightedGid, () => {
+  syncHighlightFilters();
+});
 
 onBeforeUnmount(() => {
   if (map) map.remove();
