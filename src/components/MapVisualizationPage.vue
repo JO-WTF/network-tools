@@ -1,23 +1,40 @@
 <template>
   <section class="visual-page">
-    <div class="visual-top" :style="{ flexBasis: `${topPanelHeight}%` }">
+    <div class="visual-top">
       <div ref="mapContainer" class="visual-map"></div>
       <div v-if="!mapReady" class="visual-map-empty">请输入设置中的 Mapbox 地图 Key 以启用可视化。</div>
     </div>
 
-    <div class="resize-handle">
-      <span>上下栏高度：{{ topPanelHeight }}%</span>
-      <input v-model="topPanelHeight" type="range" min="30" max="80" />
-    </div>
-
     <div class="visual-bottom">
+      <div class="dataset-tabs" role="tablist">
+        <div v-for="dataset in datasets" :key="dataset.id" class="dataset-tab-item">
+          <button
+            :class="['mode-button', { active: dataset.id === activeDatasetId }]"
+            type="button"
+            @click="activeDatasetId = dataset.id"
+          >
+            {{ dataset.name }} ({{ dataset.rows.length }})
+          </button>
+          <button
+            v-if="dataset.id === activeDatasetId"
+            class="icon-button dataset-delete"
+            type="button"
+            :disabled="datasets.length <= 1"
+            @click="removeDataset(dataset.id)"
+            aria-label="删除当前数据集"
+          >
+            ×
+          </button>
+        </div>
+        <button class="secondary add-dataset" type="button" @click="addDataset">+ 添加数据集</button>
+      </div>
+
       <div class="dataset-toolbar">
-        <button class="secondary" type="button" @click="addDataset">+ 添加数据集</button>
-        <label class="secondary upload-btn">
+        <label class="secondary action-button upload-btn">
           上传文件
           <input type="file" accept=".geojson,.json,.csv" @change="handleFileUpload" />
         </label>
-        <button class="secondary" type="button" @click="showPaste = !showPaste">粘贴数据</button>
+        <button class="secondary action-button" type="button" @click="showPaste = !showPaste">粘贴数据</button>
         <button class="secondary" type="button" @click="activateDrawPoint">地图绘制点</button>
       </div>
 
@@ -28,18 +45,6 @@
           placeholder="支持粘贴 geojson / csv / wkt (POINT, LINESTRING, POLYGON, MULTIPOLYGON)"
         />
         <button class="primary" type="button" @click="handlePasteImport">解析并导入</button>
-      </div>
-
-      <div class="dataset-tabs" role="tablist">
-        <button
-          v-for="dataset in datasets"
-          :key="dataset.id"
-          :class="['mode-button', { active: dataset.id === activeDatasetId }]"
-          type="button"
-          @click="activeDatasetId = dataset.id"
-        >
-          {{ dataset.name }} ({{ dataset.rows.length }})
-        </button>
       </div>
 
       <div v-if="activeDataset" class="table-wrap">
@@ -83,7 +88,6 @@ const props = defineProps({
   mapApiKey: { type: String, default: "" },
 });
 
-const topPanelHeight = ref(58);
 const mapContainer = ref(null);
 const mapReady = ref(false);
 const showPaste = ref(false);
@@ -508,6 +512,16 @@ const addDataset = () => {
   const nextId = Math.max(...datasets.value.map((dataset) => dataset.id)) + 1;
   datasets.value.push({ id: nextId, name: `数据集 ${nextId}`, rows: [], extraColumns: [] });
   activeDatasetId.value = nextId;
+};
+
+const removeDataset = (datasetId) => {
+  if (datasets.value.length <= 1) return;
+  datasets.value = datasets.value.filter((dataset) => dataset.id !== datasetId);
+  if (activeDatasetId.value === datasetId) {
+    activeDatasetId.value = datasets.value[0]?.id ?? 1;
+  }
+  clearSelection();
+  refreshSource();
 };
 
 const handleFileUpload = async (event) => {

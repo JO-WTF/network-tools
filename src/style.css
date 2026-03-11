@@ -552,7 +552,8 @@ button:not(:disabled):hover {
 }
 
 .visual-top {
-  min-height: 220px;
+  flex: 3;
+  min-height: 260px;
   position: relative;
   background: #fff;
   border-radius: 16px;
@@ -574,20 +575,9 @@ button:not(:disabled):hover {
   color: #475569;
 }
 
-.resize-handle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  color: #64748b;
-}
-
-.resize-handle input {
-  flex: 1;
-}
 
 .visual-bottom {
-  flex: 1;
+  flex: 2;
   min-height: 220px;
   background: #fff;
   border-radius: 16px;
@@ -673,4 +663,29 @@ button:not(:disabled):hover {
 
 .table-row-active td {
   border-bottom-color: #ffd591;
+}
+
+
+.dataset-tab-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dataset-delete {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #64748b;
+}
+
+.add-dataset {
+  margin-left: 2px;
+}
+
+.action-button {
+  min-width: 88px;
+  justify-content: center;
 }
