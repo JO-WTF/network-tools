@@ -179,7 +179,8 @@ const parseWkt = (text) => {
 };
 
 const parseCsv = (text) => {
-  const lines = text.split(/\r?\n/).filter(Boolean);
+  const normalizedText = text.includes("\n") ? text.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n") : text;
+  const lines = normalizedText.split(/\r?\n/).filter(Boolean);
   if (lines.length < 2) return [];
 
   const splitCsvLine = (line) => {
