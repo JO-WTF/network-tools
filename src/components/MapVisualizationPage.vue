@@ -174,6 +174,7 @@
             <h4>点</h4>
             <label>颜色 <input v-model="styleDraft.point.color" type="color" /></label>
             <label>半径 <input v-model.number="styleDraft.point.radius" type="number" min="2" max="30" /></label>
+            <label>透明度 <input v-model.number="styleDraft.point.opacity" type="number" min="0" max="1" step="0.1" /></label>
             <label>描边颜色 <input v-model="styleDraft.point.strokeColor" type="color" /></label>
             <label>描边宽度 <input v-model.number="styleDraft.point.strokeWidth" type="number" min="0" max="10" /></label>
           </section>
@@ -209,7 +210,7 @@ const props = defineProps({
 });
 
 const createDefaultDatasetStyle = () => ({
-  point: { color: "#f97316", radius: 6, strokeColor: "#ffffff", strokeWidth: 1 },
+  point: { color: "#f97316", radius: 6, opacity: 1, strokeColor: "#ffffff", strokeWidth: 1 },
   line: { color: "#0ea5e9", width: 3, opacity: 1 },
   polygon: { fillColor: "#2563eb", fillOpacity: 0.2, lineColor: "#1d4ed8", lineWidth: 1 },
 });
@@ -428,6 +429,7 @@ const applyDatasetPointStyle = (datasetId) => {
   if (!map.getLayer(layerId)) return;
   map.setPaintProperty(layerId, "circle-color", style.color);
   map.setPaintProperty(layerId, "circle-radius", style.radius);
+  map.setPaintProperty(layerId, "circle-opacity", style.opacity);
   map.setPaintProperty(layerId, "circle-stroke-color", style.strokeColor);
   map.setPaintProperty(layerId, "circle-stroke-width", style.strokeWidth);
 };
