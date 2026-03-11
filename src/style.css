@@ -709,3 +709,27 @@ button:not(:disabled):hover {
   font-size: 13px;
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.15);
 }
+
+
+.table-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.filter-row,
+.pager-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.filter-row .small.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}

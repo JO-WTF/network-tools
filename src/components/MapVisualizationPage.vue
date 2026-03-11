@@ -50,6 +50,41 @@
         <button class="primary" type="button" @click="handlePasteImport" :disabled="isProcessing">解析并导入</button>
       </div>
 
+      <div v-if="activeDataset" class="table-tools">
+        <div class="filter-row">
+          <span>筛选：</span>
+          <button
+            type="button"
+            class="secondary small"
+            :class="{ active: geometryFilter === 'point' }"
+            @click="setGeometryFilter('point')"
+          >
+            点
+          </button>
+          <button
+            type="button"
+            class="secondary small"
+            :class="{ active: geometryFilter === 'line' }"
+            @click="setGeometryFilter('line')"
+          >
+            线
+          </button>
+          <button
+            type="button"
+            class="secondary small"
+            :class="{ active: geometryFilter === 'polygon' }"
+            @click="setGeometryFilter('polygon')"
+          >
+            面
+          </button>
+        </div>
+        <div class="pager-row">
+          <button class="secondary small" type="button" :disabled="currentPage <= 1" @click="changePage(currentPage - 1)">上一页</button>
+          <span>第 {{ currentPage }} / {{ totalPages }} 页</span>
+          <button class="secondary small" type="button" :disabled="currentPage >= totalPages" @click="changePage(currentPage + 1)">下一页</button>
+        </div>
+      </div>
+
       <div v-if="activeDataset" class="table-wrap">
         <table>
           <thead>
@@ -63,7 +98,7 @@
           </thead>
           <tbody>
             <tr
-              v-for="row in activeDataset.rows"
+              v-for="row in pagedRows"
               :key="row.featureKey"
               :ref="bindRowRef(row.featureKey)"
               :class="{ 'table-row-active': selectedFeatureKey === row.featureKey }"
@@ -100,6 +135,9 @@ const isProcessing = ref(false);
 const datasets = ref([{ id: 1, name: "数据集 1", rows: [], extraColumns: [] }]);
 const activeDatasetId = ref(1);
 const selectedFeatureKey = ref("");
+const geometryFilter = ref("point");
+const currentPage = ref(1);
+const pageSize = 20;
 
 const rowElementMap = new Map();
 let featureCounter = 1;
@@ -110,6 +148,35 @@ const pointLayerPrefix = "viz-dataset-point-layer-";
 const pointSourcePrefix = "viz-dataset-point-source-";
 
 const activeDataset = computed(() => datasets.value.find((d) => d.id === activeDatasetId.value));
+
+
+
+const geometryGroupMap = {
+  Point: "point",
+  MultiPoint: "point",
+  LineString: "line",
+  MultiLineString: "line",
+  Polygon: "polygon",
+  MultiPolygon: "polygon",
+};
+
+const resolveGeometryGroup = (geometryType = "") => geometryGroupMap[geometryType] || "";
+
+const sortedRows = computed(() => {
+  if (!activeDataset.value) return [];
+  return [...activeDataset.value.rows].sort((a, b) => Number(a.gid) - Number(b.gid));
+});
+
+const filteredRows = computed(() =>
+  sortedRows.value.filter((row) => resolveGeometryGroup(row.geometryType) === geometryFilter.value)
+);
+
+const totalPages = computed(() => Math.max(Math.ceil(filteredRows.value.length / pageSize), 1));
+
+const pagedRows = computed(() => {
+  const start = (currentPage.value - 1) * pageSize;
+  return filteredRows.value.slice(start, start + pageSize);
+});
 
 const bindRowRef = (featureKey) => (el) => {
   if (el) rowElementMap.set(featureKey, el);
@@ -135,6 +202,36 @@ const syncHighlightFilters = () => {
       map.setFilter(layerId, highlightFilter(geometryType));
     }
   });
+};
+
+
+
+const ensureValidGeometryFilter = () => {
+  const available = new Set((activeDataset.value?.rows || []).map((row) => resolveGeometryGroup(row.geometryType)).filter(Boolean));
+  if (!available.size) return;
+  if (!available.has(geometryFilter.value)) {
+    geometryFilter.value = available.has("point")
+      ? "point"
+      : available.has("line")
+        ? "line"
+        : "polygon";
+  }
+};
+
+const setGeometryFilter = (group) => {
+  geometryFilter.value = group;
+  currentPage.value = 1;
+};
+
+const changePage = (page) => {
+  currentPage.value = Math.min(Math.max(page, 1), totalPages.value);
+};
+
+const ensureSelectedRowVisible = (featureKey) => {
+  const rowIndex = filteredRows.value.findIndex((row) => row.featureKey === featureKey);
+  if (rowIndex === -1) return false;
+  currentPage.value = Math.floor(rowIndex / pageSize) + 1;
+  return true;
 };
 
 const clearSelection = () => {
@@ -521,6 +618,7 @@ const appendRowsFromFeatures = (features) => {
 
   activeDataset.value.rows.push(...nextRows);
   activeDataset.value.extraColumns = Array.from(extraColumns);
+  ensureValidGeometryFilter();
   refreshSource();
 };
 
@@ -619,6 +717,7 @@ const popupHtml = (properties = {}) => {
 
 const focusRow = async (featureKey) => {
   await nextTick();
+  await nextTick();
   const el = rowElementMap.get(featureKey);
   if (el) {
     el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -631,6 +730,16 @@ const selectFeatureByMeta = async ({ datasetId, featureKey, lngLat, properties }
     activeDatasetId.value = datasetId;
     await nextTick();
   }
+  const datasetRows = (activeDataset.value?.rows || []);
+  const targetRow = datasetRows.find((row) => row.featureKey === featureKey);
+  if (targetRow) {
+    const targetGroup = resolveGeometryGroup(targetRow.geometryType);
+    if (targetGroup && geometryFilter.value !== targetGroup) {
+      geometryFilter.value = targetGroup;
+    }
+    ensureSelectedRowVisible(featureKey);
+  }
+
   selectedFeatureKey.value = featureKey;
   syncHighlightFilters();
   await focusRow(featureKey);
@@ -692,6 +801,7 @@ const removeFeature = (featureKey) => {
   if (selectedFeatureKey.value === featureKey) {
     clearSelection();
   }
+  ensureValidGeometryFilter();
   refreshSource();
 };
 
@@ -716,6 +826,14 @@ watch(selectedFeatureKey, () => {
 
 watch(activeDatasetId, () => {
   clearSelection();
+  ensureValidGeometryFilter();
+  currentPage.value = 1;
+});
+
+watch(totalPages, (value) => {
+  if (currentPage.value > value) {
+    currentPage.value = value;
+  }
 });
 
 onBeforeUnmount(() => {
