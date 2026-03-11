@@ -54,14 +54,19 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in activeDataset.rows" :key="row.gid">
+            <tr
+              v-for="row in activeDataset.rows"
+              :key="row.featureKey"
+              :ref="bindRowRef(row.featureKey)"
+              :class="{ 'table-row-active': selectedFeatureKey === row.featureKey }"
+            >
               <td>{{ row.gid }}</td>
               <td>
                 <span class="geometry-badge">{{ row.geometryType }}</span>
               </td>
               <td v-for="col in activeDataset.extraColumns" :key="col">{{ row.properties[col] ?? '-' }}</td>
-              <td><button class="secondary small" type="button" @click="locateFeature(row.feature, row.gid)">定位</button></td>
-              <td><button class="secondary small" type="button" @click="removeFeature(row.gid)">删除</button></td>
+              <td><button class="secondary small" type="button" @click="locateFeature(row)">定位</button></td>
+              <td><button class="secondary small" type="button" @click="removeFeature(row.featureKey)">删除</button></td>
             </tr>
           </tbody>
         </table>
@@ -71,7 +76,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import mapboxgl from "mapbox-gl";
 
 const props = defineProps({
@@ -84,24 +89,62 @@ const mapReady = ref(false);
 const showPaste = ref(false);
 const pasteInput = ref("");
 
-const datasets = ref([{ id: 1, name: "数据集 1", rows: [], features: [], extraColumns: [] }]);
+const datasets = ref([{ id: 1, name: "数据集 1", rows: [], extraColumns: [] }]);
 const activeDatasetId = ref(1);
-const highlightedGid = ref(null);
+const selectedFeatureKey = ref("");
 
+const rowElementMap = new Map();
+let featureCounter = 1;
 let map = null;
 let drawPointMode = false;
+let mapPopup = null;
+
+const interactiveLayerIds = [
+  "viz-fill",
+  "viz-polygon-outline",
+  "viz-line",
+  "viz-point",
+  "viz-highlight-fill",
+  "viz-highlight-polygon-outline",
+  "viz-highlight-line",
+  "viz-highlight-point",
+];
 
 const activeDataset = computed(() => datasets.value.find((d) => d.id === activeDatasetId.value));
 
-const highlightFilter = () => ["==", ["coalesce", ["get", "__gid"], -1], highlightedGid.value ?? -1];
+const bindRowRef = (featureKey) => (el) => {
+  if (el) rowElementMap.set(featureKey, el);
+  else rowElementMap.delete(featureKey);
+};
+
+const highlightFilter = (geometryType) => [
+  "all",
+  ["==", ["geometry-type"], geometryType],
+  ["==", ["coalesce", ["get", "__featureKey"], ""], selectedFeatureKey.value || ""],
+];
 
 const syncHighlightFilters = () => {
   if (!mapReady.value || !map) return;
-  ["viz-highlight-fill", "viz-highlight-line", "viz-highlight-point"].forEach((layerId) => {
+  const configs = [
+    ["viz-highlight-fill", "Polygon"],
+    ["viz-highlight-polygon-outline", "Polygon"],
+    ["viz-highlight-line", "LineString"],
+    ["viz-highlight-point", "Point"],
+  ];
+  configs.forEach(([layerId, geometryType]) => {
     if (map.getLayer(layerId)) {
-      map.setFilter(layerId, highlightFilter());
+      map.setFilter(layerId, highlightFilter(geometryType));
     }
   });
+};
+
+const clearSelection = () => {
+  selectedFeatureKey.value = "";
+  syncHighlightFilters();
+  if (mapPopup) {
+    mapPopup.remove();
+    mapPopup = null;
+  }
 };
 
 const ensureMap = () => {
@@ -113,9 +156,11 @@ const ensureMap = () => {
     center: [116.397, 39.908],
     zoom: 4,
   });
+
   map.on("load", () => {
     mapReady.value = true;
     map.addSource("viz-source", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+
     map.addLayer({
       id: "viz-fill",
       type: "fill",
@@ -149,25 +194,33 @@ const ensureMap = () => {
         "circle-stroke-width": 1,
       },
     });
+
     map.addLayer({
       id: "viz-highlight-fill",
       type: "fill",
       source: "viz-source",
-      filter: highlightFilter(),
-      paint: { "fill-color": "#fde047", "fill-opacity": 0.35 },
+      filter: highlightFilter("Polygon"),
+      paint: { "fill-color": "#f59e0b", "fill-opacity": 0.35 },
+    });
+    map.addLayer({
+      id: "viz-highlight-polygon-outline",
+      type: "line",
+      source: "viz-source",
+      filter: highlightFilter("Polygon"),
+      paint: { "line-color": "#f59e0b", "line-width": 3 },
     });
     map.addLayer({
       id: "viz-highlight-line",
       type: "line",
       source: "viz-source",
-      filter: highlightFilter(),
-      paint: { "line-color": "#f59e0b", "line-width": 4 },
+      filter: highlightFilter("LineString"),
+      paint: { "line-color": "#f59e0b", "line-width": 5 },
     });
     map.addLayer({
       id: "viz-highlight-point",
       type: "circle",
       source: "viz-source",
-      filter: highlightFilter(),
+      filter: highlightFilter("Point"),
       paint: {
         "circle-color": "#f59e0b",
         "circle-radius": 8,
@@ -175,17 +228,41 @@ const ensureMap = () => {
         "circle-stroke-width": 2,
       },
     });
+
     map.on("click", (event) => {
-      if (!drawPointMode) return;
-      appendRowsFromFeatures([
-        {
-          type: "Feature",
-          geometry: { type: "Point", coordinates: [event.lngLat.lng, event.lngLat.lat] },
-          properties: {},
-        },
-      ]);
-      drawPointMode = false;
+      if (drawPointMode) {
+        appendRowsFromFeatures([
+          {
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [event.lngLat.lng, event.lngLat.lat] },
+            properties: {},
+          },
+        ]);
+        drawPointMode = false;
+        return;
+      }
+      const hits = map.queryRenderedFeatures(event.point, { layers: interactiveLayerIds });
+      if (!hits.length) {
+        clearSelection();
+      }
     });
+
+    const bindFeatureClick = (layerId) => {
+      map.on("click", layerId, (event) => {
+        const feature = event.features?.[0];
+        if (!feature) return;
+        selectFeatureFromMap(feature, event.lngLat);
+      });
+      map.on("mouseenter", layerId, () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", layerId, () => {
+        map.getCanvas().style.cursor = "";
+      });
+    };
+
+    ["viz-fill", "viz-polygon-outline", "viz-line", "viz-point"].forEach(bindFeatureClick);
+
     refreshSource();
   });
 };
@@ -197,30 +274,30 @@ const parseWkt = (text) => {
     body
       .split(",")
       .map((pair) => pair.trim().split(/\s+/).map(Number))
-      .filter((pair) => pair.length >= 2 && pair.every((v) => Number.isFinite(v)))
+      .filter((pair) => pair.length >= 2 && pair.every((value) => Number.isFinite(value)))
       .map((pair) => [pair[0], pair[1]]);
 
   if (upper.startsWith("POINT")) {
-    const m = raw.match(/POINT\s*\(([^)]+)\)/i);
-    if (!m) return null;
-    const pair = m[1].trim().split(/\s+/).map(Number);
+    const match = raw.match(/POINT\s*\(([^)]+)\)/i);
+    if (!match) return null;
+    const pair = match[1].trim().split(/\s+/).map(Number);
     if (pair.length < 2) return null;
     return { type: "Point", coordinates: [pair[0], pair[1]] };
   }
   if (upper.startsWith("LINESTRING")) {
-    const m = raw.match(/LINESTRING\s*\(([^)]+)\)/i);
-    if (!m) return null;
-    return { type: "LineString", coordinates: extractPairs(m[1]) };
+    const match = raw.match(/LINESTRING\s*\(([^)]+)\)/i);
+    if (!match) return null;
+    return { type: "LineString", coordinates: extractPairs(match[1]) };
   }
   if (upper.startsWith("POLYGON")) {
-    const m = raw.match(/POLYGON\s*\(\((.+)\)\)/i);
-    if (!m) return null;
-    return { type: "Polygon", coordinates: [extractPairs(m[1])] };
+    const match = raw.match(/POLYGON\s*\(\((.+)\)\)/i);
+    if (!match) return null;
+    return { type: "Polygon", coordinates: [extractPairs(match[1])] };
   }
   if (upper.startsWith("MULTIPOLYGON")) {
-    const m = raw.match(/MULTIPOLYGON\s*\(\((.+)\)\)/i);
-    if (!m) return null;
-    const polygons = m[1]
+    const match = raw.match(/MULTIPOLYGON\s*\(\((.+)\)\)/i);
+    if (!match) return null;
+    const polygons = match[1]
       .split(/\)\s*\),\s*\(\(/)
       .map((segment) => [extractPairs(segment.replaceAll("(", "").replaceAll(")", ""))]);
     return { type: "MultiPolygon", coordinates: polygons };
@@ -229,7 +306,7 @@ const parseWkt = (text) => {
 };
 
 const parseCsv = (text) => {
-  const normalizedText = text.includes("\n") ? text.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n") : text;
+  const normalizedText = text.includes("\\n") ? text.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n") : text;
   const lines = normalizedText.split(/\r?\n/).filter(Boolean);
   if (lines.length < 2) return [];
 
@@ -265,12 +342,12 @@ const parseCsv = (text) => {
     return values;
   };
 
-  const headers = splitCsvLine(lines[0]).map((h) => h.trim());
+  const headers = splitCsvLine(lines[0]).map((header) => header.trim());
   return lines.slice(1).map((line) => {
     const values = splitCsvLine(line);
     const row = {};
-    headers.forEach((h, i) => {
-      row[h] = values[i]?.trim() ?? "";
+    headers.forEach((header, index) => {
+      row[header] = values[index]?.trim() ?? "";
     });
     return row;
   });
@@ -299,21 +376,24 @@ const parseCoordinatePairsString = (value) => {
 
 const detectGeometryFromRow = (row) => {
   const keys = Object.keys(row);
-  const lowerKeyMap = Object.fromEntries(keys.map((k) => [k.toLowerCase(), k]));
-  const wktKey = Object.keys(lowerKeyMap).find((k) => ["wkt", "geometry", "geom", "the_geom"].some((f) => k.includes(f)));
+  const lowerKeyMap = Object.fromEntries(keys.map((key) => [key.toLowerCase(), key]));
+
+  const wktKey = Object.keys(lowerKeyMap).find((key) =>
+    ["wkt", "geometry", "geom", "the_geom"].some((field) => key.includes(field))
+  );
   if (wktKey && typeof row[lowerKeyMap[wktKey]] === "string") {
-    const maybe = parseWkt(row[lowerKeyMap[wktKey]]);
-    if (maybe) return maybe;
+    const maybeGeometry = parseWkt(row[lowerKeyMap[wktKey]]);
+    if (maybeGeometry) return maybeGeometry;
     try {
       const geometry = JSON.parse(row[lowerKeyMap[wktKey]]);
       if (geometry?.type && geometry?.coordinates) return geometry;
     } catch {
-      // ignore
+      // ignore json parse error
     }
   }
 
-  const lngKey = Object.keys(lowerKeyMap).find((k) => ["lng", "lon", "long", "longitude", "x"].includes(k));
-  const latKey = Object.keys(lowerKeyMap).find((k) => ["lat", "latitude", "y"].includes(k));
+  const lngKey = Object.keys(lowerKeyMap).find((key) => ["lng", "lon", "long", "longitude", "x"].includes(key));
+  const latKey = Object.keys(lowerKeyMap).find((key) => ["lat", "latitude", "y"].includes(key));
   if (lngKey && latKey) {
     const lng = Number(row[lowerKeyMap[lngKey]]);
     const lat = Number(row[lowerKeyMap[latKey]]);
@@ -322,46 +402,53 @@ const detectGeometryFromRow = (row) => {
     }
   }
 
-  const coordsKey = Object.keys(lowerKeyMap).find((k) => ["coords", "coordinates", "path", "boundary"].some((name) => k.includes(name)));
+  const coordsKey = Object.keys(lowerKeyMap).find((key) =>
+    ["coords", "coordinates", "path", "boundary"].some((field) => key.includes(field))
+  );
   if (coordsKey) {
     const coordValue = row[lowerKeyMap[coordsKey]];
     try {
       const parsed = JSON.parse(coordValue);
       if (Array.isArray(parsed)) {
         if (typeof parsed[0] === "number") return { type: "Point", coordinates: parsed };
-        if (Array.isArray(parsed[0]) && typeof parsed[0][0] === "number") return { type: "LineString", coordinates: parsed };
-        if (Array.isArray(parsed[0]) && Array.isArray(parsed[0][0])) return { type: "Polygon", coordinates: parsed };
+        if (Array.isArray(parsed[0]) && typeof parsed[0][0] === "number") {
+          return { type: "LineString", coordinates: parsed };
+        }
+        if (Array.isArray(parsed[0]) && Array.isArray(parsed[0][0])) {
+          return { type: "Polygon", coordinates: parsed };
+        }
       }
     } catch {
       const parsedPairs = parseCoordinatePairsString(coordValue);
       if (parsedPairs) return parsedPairs;
     }
   }
+
   return null;
 };
 
 const parseContentToFeatures = (text) => {
   const trimmed = text.trim();
   if (!trimmed) return [];
+
   try {
     const json = JSON.parse(trimmed);
     if (json.type === "FeatureCollection") return json.features || [];
     if (json.type === "Feature") return [json];
     if (json.type && json.coordinates) return [{ type: "Feature", geometry: json, properties: {} }];
   } catch {
-    // ignore
+    // ignore json parse error
   }
 
   if (/^(POINT|LINESTRING|POLYGON|MULTIPOLYGON)/i.test(trimmed)) {
-    const geometries = trimmed
+    return trimmed
       .split(/\r?\n/)
       .map((line) => parseWkt(line))
-      .filter(Boolean);
-    return geometries.map((geometry) => ({ type: "Feature", geometry, properties: {} }));
+      .filter(Boolean)
+      .map((geometry) => ({ type: "Feature", geometry, properties: {} }));
   }
 
-  const csvRows = parseCsv(trimmed);
-  return csvRows
+  return parseCsv(trimmed)
     .map((row) => {
       const geometry = detectGeometryFromRow(row);
       if (!geometry) return null;
@@ -373,32 +460,40 @@ const parseContentToFeatures = (text) => {
 const appendRowsFromFeatures = (features) => {
   if (!activeDataset.value) return;
   const start = activeDataset.value.rows.length + 1;
+
   const nextRows = features.map((feature, index) => {
     const gid = start + index;
+    const featureKey = `d${activeDataset.value.id}-f${featureCounter}`;
+    featureCounter += 1;
     const normalizedFeature = {
       ...feature,
       properties: {
         ...(feature.properties || {}),
         __gid: gid,
+        __datasetId: activeDataset.value.id,
+        __featureKey: featureKey,
       },
     };
+
     return {
       gid,
+      featureKey,
       geometryType: normalizedFeature.geometry?.type || "Unknown",
       properties: normalizedFeature.properties || {},
       feature: normalizedFeature,
     };
   });
+
   const extraColumns = new Set(activeDataset.value.extraColumns);
   nextRows.forEach((row) => {
     Object.keys(row.properties || {}).forEach((key) => {
-      if (!["gid", "geometry"].includes(key.toLowerCase())) {
+      if (!key.toLowerCase().startsWith("__") && !["gid", "geometry"].includes(key.toLowerCase())) {
         extraColumns.add(key);
       }
     });
   });
+
   activeDataset.value.rows.push(...nextRows);
-  activeDataset.value.features.push(...features);
   activeDataset.value.extraColumns = Array.from(extraColumns);
   refreshSource();
 };
@@ -411,7 +506,7 @@ const refreshSource = () => {
 
 const addDataset = () => {
   const nextId = Math.max(...datasets.value.map((dataset) => dataset.id)) + 1;
-  datasets.value.push({ id: nextId, name: `数据集 ${nextId}`, rows: [], features: [], extraColumns: [] });
+  datasets.value.push({ id: nextId, name: `数据集 ${nextId}`, rows: [], extraColumns: [] });
   activeDatasetId.value = nextId;
 };
 
@@ -428,35 +523,109 @@ const handlePasteImport = () => {
   pasteInput.value = "";
 };
 
-const locateFeature = (feature) => {
-  if (!mapReady.value || !feature?.geometry) return;
-  highlightedGid.value = feature?.properties?.__gid ?? null;
-  syncHighlightFilters();
-  const g = feature.geometry;
-  if (g.type === "Point") {
-    map.flyTo({ center: g.coordinates, zoom: 12 });
-    return;
-  }
-  const coords = JSON.stringify(g.coordinates).match(/-?\d+(\.\d+)?/g)?.map(Number) || [];
-  if (coords.length >= 4) {
-    const lngs = coords.filter((_, idx) => idx % 2 === 0);
-    const lats = coords.filter((_, idx) => idx % 2 === 1);
-    map.fitBounds(
-      [
-        [Math.min(...lngs), Math.min(...lats)],
-        [Math.max(...lngs), Math.max(...lats)],
-      ],
-      { padding: 40 }
-    );
+const extractBounds = (geometry) => {
+  const values = JSON.stringify(geometry?.coordinates || [])
+    .match(/-?\d+(\.\d+)?/g)
+    ?.map(Number);
+  if (!values || values.length < 2) return null;
+  const lngs = values.filter((_, index) => index % 2 === 0);
+  const lats = values.filter((_, index) => index % 2 === 1);
+  if (!lngs.length || !lats.length) return null;
+  return {
+    minLng: Math.min(...lngs),
+    minLat: Math.min(...lats),
+    maxLng: Math.max(...lngs),
+    maxLat: Math.max(...lats),
+  };
+};
+
+const popupHtml = (properties = {}) => {
+  const entries = Object.entries(properties).filter(([key]) => !key.startsWith("__"));
+  if (!entries.length) return "<div style='font-size:12px;color:#64748b'>无扩展属性</div>";
+  return `<div style='min-width:180px'>${entries
+    .map(
+      ([key, value]) =>
+        `<div style='display:flex;gap:8px;font-size:12px;line-height:1.5'><strong style='min-width:80px'>${key}</strong><span>${
+          value === "" || value == null ? "-" : String(value)
+        }</span></div>`
+    )
+    .join("")}</div>`;
+};
+
+const focusRow = async (featureKey) => {
+  await nextTick();
+  const el = rowElementMap.get(featureKey);
+  if (el) {
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 };
 
-const removeFeature = (gid) => {
+const selectFeatureByMeta = async ({ datasetId, featureKey, lngLat, properties }) => {
+  if (!featureKey) return;
+  if (datasetId && activeDatasetId.value !== datasetId) {
+    activeDatasetId.value = datasetId;
+    await nextTick();
+  }
+  selectedFeatureKey.value = featureKey;
+  syncHighlightFilters();
+  await focusRow(featureKey);
+
+  if (mapPopup) {
+    mapPopup.remove();
+    mapPopup = null;
+  }
+  if (lngLat && map) {
+    mapPopup = new mapboxgl.Popup({ closeButton: false, offset: 14 })
+      .setLngLat(lngLat)
+      .setHTML(popupHtml(properties))
+      .addTo(map);
+  }
+};
+
+const selectFeatureFromMap = async (feature, lngLat) => {
+  const datasetId = Number(feature?.properties?.__datasetId);
+  const featureKey = feature?.properties?.__featureKey || "";
+  await selectFeatureByMeta({ datasetId, featureKey, lngLat, properties: feature?.properties || {} });
+};
+
+const locateFeature = async (row) => {
+  if (!mapReady.value || !row?.feature?.geometry) return;
+  const geometry = row.feature.geometry;
+
+  if (geometry.type === "Point") {
+    map.flyTo({ center: geometry.coordinates, zoom: 12 });
+    await selectFeatureByMeta({
+      datasetId: activeDatasetId.value,
+      featureKey: row.featureKey,
+      lngLat: { lng: geometry.coordinates[0], lat: geometry.coordinates[1] },
+      properties: row.properties,
+    });
+    return;
+  }
+
+  const bounds = extractBounds(geometry);
+  if (bounds) {
+    map.fitBounds(
+      [
+        [bounds.minLng, bounds.minLat],
+        [bounds.maxLng, bounds.maxLat],
+      ],
+      { padding: 40 }
+    );
+    await selectFeatureByMeta({
+      datasetId: activeDatasetId.value,
+      featureKey: row.featureKey,
+      lngLat: { lng: (bounds.minLng + bounds.maxLng) / 2, lat: (bounds.minLat + bounds.maxLat) / 2 },
+      properties: row.properties,
+    });
+  }
+};
+
+const removeFeature = (featureKey) => {
   if (!activeDataset.value) return;
-  activeDataset.value.rows = activeDataset.value.rows.filter((row) => row.gid !== gid);
-  if (highlightedGid.value === gid) {
-    highlightedGid.value = null;
-    syncHighlightFilters();
+  activeDataset.value.rows = activeDataset.value.rows.filter((row) => row.featureKey !== featureKey);
+  if (selectedFeatureKey.value === featureKey) {
+    clearSelection();
   }
   refreshSource();
 };
@@ -476,11 +645,19 @@ watch(
   }
 );
 
-watch(highlightedGid, () => {
+watch(selectedFeatureKey, () => {
   syncHighlightFilters();
 });
 
+watch(activeDatasetId, () => {
+  clearSelection();
+});
+
 onBeforeUnmount(() => {
+  if (mapPopup) {
+    mapPopup.remove();
+    mapPopup = null;
+  }
   if (map) map.remove();
 });
 </script>

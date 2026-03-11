@@ -666,3 +666,11 @@ button:not(:disabled):hover {
   padding: 4px 8px;
   font-size: 12px;
 }
+
+.table-row-active {
+  background: #fff7e6;
+}
+
+.table-row-active td {
+  border-bottom-color: #ffd591;
+}
