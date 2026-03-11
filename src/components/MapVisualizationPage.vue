@@ -102,17 +102,8 @@ let featureCounter = 1;
 let map = null;
 let drawPointMode = false;
 let mapPopup = null;
-
-const interactiveLayerIds = [
-  "viz-fill",
-  "viz-polygon-outline",
-  "viz-line",
-  "viz-point",
-  "viz-highlight-fill",
-  "viz-highlight-polygon-outline",
-  "viz-highlight-line",
-  "viz-highlight-point",
-];
+const pointLayerPrefix = "viz-dataset-point-layer-";
+const pointSourcePrefix = "viz-dataset-point-source-";
 
 const activeDataset = computed(() => datasets.value.find((d) => d.id === activeDatasetId.value));
 
@@ -151,6 +142,57 @@ const clearSelection = () => {
   }
 };
 
+const getDatasetPointLayerId = (datasetId) => `${pointLayerPrefix}${datasetId}`;
+const getDatasetPointSourceId = (datasetId) => `${pointSourcePrefix}${datasetId}`;
+
+const getInteractiveLayerIds = () => [
+  "viz-fill",
+  "viz-polygon-outline",
+  "viz-line",
+  ...datasets.value.map((dataset) => getDatasetPointLayerId(dataset.id)),
+  "viz-highlight-fill",
+  "viz-highlight-polygon-outline",
+  "viz-highlight-line",
+  "viz-highlight-point",
+].filter((layerId) => map?.getLayer(layerId));
+
+
+const ensureDatasetPointLayer = (datasetId) => {
+  if (!mapReady.value || !map) return;
+  const sourceId = getDatasetPointSourceId(datasetId);
+  const layerId = getDatasetPointLayerId(datasetId);
+
+  if (!map.getSource(sourceId)) {
+    map.addSource(sourceId, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+  }
+
+  if (!map.getLayer(layerId)) {
+    map.addLayer({
+      id: layerId,
+      type: "circle",
+      source: sourceId,
+      paint: {
+        "circle-color": "#f97316",
+        "circle-radius": 6,
+        "circle-stroke-color": "#fff",
+        "circle-stroke-width": 1,
+      },
+    });
+  }
+
+};
+
+const removeDatasetPointLayer = (datasetId) => {
+  if (!map) return;
+  const sourceId = getDatasetPointSourceId(datasetId);
+  const layerId = getDatasetPointLayerId(datasetId);
+  if (map.getLayer(layerId)) map.removeLayer(layerId);
+  if (map.getSource(sourceId)) map.removeSource(sourceId);
+};
+
 const ensureMap = () => {
   if (!props.mapApiKey || !mapContainer.value || map) return;
   mapboxgl.accessToken = props.mapApiKey;
@@ -186,19 +228,6 @@ const ensureMap = () => {
       filter: ["==", ["geometry-type"], "LineString"],
       paint: { "line-color": "#0ea5e9", "line-width": 3 },
     });
-    map.addLayer({
-      id: "viz-point",
-      type: "circle",
-      source: "viz-source",
-      filter: ["==", ["geometry-type"], "Point"],
-      paint: {
-        "circle-color": "#f97316",
-        "circle-radius": 6,
-        "circle-stroke-color": "#fff",
-        "circle-stroke-width": 1,
-      },
-    });
-
     map.addLayer({
       id: "viz-highlight-fill",
       type: "fill",
@@ -245,27 +274,16 @@ const ensureMap = () => {
         drawPointMode = false;
         return;
       }
-      const hits = map.queryRenderedFeatures(event.point, { layers: interactiveLayerIds });
-      if (!hits.length) {
-        clearSelection();
-      }
+      const hits = map.queryRenderedFeatures(event.point, { layers: getInteractiveLayerIds() });
+      if (!hits.length) return clearSelection();
+      selectFeatureFromMap(hits[0], event.lngLat);
     });
 
-    const bindFeatureClick = (layerId) => {
-      map.on("click", layerId, (event) => {
-        const feature = event.features?.[0];
-        if (!feature) return;
-        selectFeatureFromMap(feature, event.lngLat);
-      });
-      map.on("mouseenter", layerId, () => {
-        map.getCanvas().style.cursor = "pointer";
-      });
-      map.on("mouseleave", layerId, () => {
-        map.getCanvas().style.cursor = "";
-      });
-    };
+    map.on("mousemove", (event) => {
+      const hits = map.queryRenderedFeatures(event.point, { layers: getInteractiveLayerIds() });
+      map.getCanvas().style.cursor = hits.length ? "pointer" : "";
+    });
 
-    ["viz-fill", "viz-polygon-outline", "viz-line", "viz-point"].forEach(bindFeatureClick);
 
     refreshSource();
   });
@@ -506,6 +524,15 @@ const refreshSource = () => {
   if (!mapReady.value || !map) return;
   const allFeatures = datasets.value.flatMap((dataset) => dataset.rows.map((row) => row.feature));
   map.getSource("viz-source")?.setData({ type: "FeatureCollection", features: allFeatures });
+
+  datasets.value.forEach((dataset) => {
+    ensureDatasetPointLayer(dataset.id);
+    const sourceId = getDatasetPointSourceId(dataset.id);
+    const pointFeatures = dataset.rows
+      .map((row) => row.feature)
+      .filter((feature) => feature?.geometry?.type === "Point");
+    map.getSource(sourceId)?.setData({ type: "FeatureCollection", features: pointFeatures });
+  });
 };
 
 const addDataset = () => {
@@ -517,6 +544,7 @@ const addDataset = () => {
 const removeDataset = (datasetId) => {
   if (datasets.value.length <= 1) return;
   datasets.value = datasets.value.filter((dataset) => dataset.id !== datasetId);
+  removeDatasetPointLayer(datasetId);
   if (activeDatasetId.value === datasetId) {
     activeDatasetId.value = datasets.value[0]?.id ?? 1;
   }
