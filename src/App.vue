@@ -8,7 +8,9 @@
       @open-settings="showSettings = true"
     />
 
-    <main class="layout">
+    <MapVisualizationPage v-if="mode === 'visualize'" :map-api-key="mapApiKey" />
+
+    <main v-else class="layout">
       <section class="panel">
         <div class="card">
           <div class="card-header">
@@ -287,6 +289,7 @@
 import AppHeader from "./components/AppHeader.vue";
 import ProgressCard from "./components/ProgressCard.vue";
 import LogCard from "./components/LogCard.vue";
+import MapVisualizationPage from "./components/MapVisualizationPage.vue";
 import { useNetworkToolsApp } from "./composables/useNetworkToolsApp";
 
 const {
