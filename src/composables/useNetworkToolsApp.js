@@ -28,9 +28,14 @@ const customGeocodeUrl = ref("");
 const customRouteUrl = ref("");
 const customToken = ref("");
 const defaultWebSocketUrl = () => {
-  if (typeof window === "undefined") return "ws://localhost:8765";
+  if (typeof window === "undefined") return "ws://sim.isc.huawei.com:8765";
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${protocol}://${window.location.hostname}:8765`;
+  const hostname = window.location.hostname;
+  const resolvedHost =
+    hostname === "0.0.0.0" || hostname === "localhost" || hostname === "127.0.0.1"
+      ? "sim.isc.huawei.com"
+      : hostname;
+  return `${protocol}://${resolvedHost}:8765`;
 };
 const customWebSocketUrl = ref(defaultWebSocketUrl());
 const customSocket = ref(null);
