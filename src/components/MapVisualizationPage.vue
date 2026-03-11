@@ -181,15 +181,69 @@ const parseWkt = (text) => {
 const parseCsv = (text) => {
   const lines = text.split(/\r?\n/).filter(Boolean);
   if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map((h) => h.trim());
+
+  const splitCsvLine = (line) => {
+    const values = [];
+    let current = "";
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i += 1) {
+      const char = line[i];
+      const next = line[i + 1];
+
+      if (char === '"') {
+        if (inQuotes && next === '"') {
+          current += '"';
+          i += 1;
+        } else {
+          inQuotes = !inQuotes;
+        }
+        continue;
+      }
+
+      if (char === "," && !inQuotes) {
+        values.push(current.trim());
+        current = "";
+        continue;
+      }
+
+      current += char;
+    }
+
+    values.push(current.trim());
+    return values;
+  };
+
+  const headers = splitCsvLine(lines[0]).map((h) => h.trim());
   return lines.slice(1).map((line) => {
-    const values = line.split(",");
+    const values = splitCsvLine(line);
     const row = {};
     headers.forEach((h, i) => {
       row[h] = values[i]?.trim() ?? "";
     });
     return row;
   });
+};
+
+const parseCoordinatePairsString = (value) => {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const pairs = value
+    .split(",")
+    .map((segment) => segment.trim().split(/\s+/).map(Number))
+    .filter((pair) => pair.length >= 2 && Number.isFinite(pair[0]) && Number.isFinite(pair[1]))
+    .map((pair) => [pair[0], pair[1]]);
+
+  if (pairs.length < 2) return null;
+  if (pairs.length >= 4) {
+    const first = pairs[0];
+    const last = pairs[pairs.length - 1];
+    const isClosed = first[0] === last[0] && first[1] === last[1];
+    return {
+      type: "Polygon",
+      coordinates: [isClosed ? pairs : [...pairs, first]],
+    };
+  }
+  return { type: "LineString", coordinates: pairs };
 };
 
 const detectGeometryFromRow = (row) => {
@@ -219,15 +273,17 @@ const detectGeometryFromRow = (row) => {
 
   const coordsKey = Object.keys(lowerKeyMap).find((k) => ["coords", "coordinates", "path", "boundary"].some((name) => k.includes(name)));
   if (coordsKey) {
+    const coordValue = row[lowerKeyMap[coordsKey]];
     try {
-      const parsed = JSON.parse(row[lowerKeyMap[coordsKey]]);
+      const parsed = JSON.parse(coordValue);
       if (Array.isArray(parsed)) {
         if (typeof parsed[0] === "number") return { type: "Point", coordinates: parsed };
         if (Array.isArray(parsed[0]) && typeof parsed[0][0] === "number") return { type: "LineString", coordinates: parsed };
         if (Array.isArray(parsed[0]) && Array.isArray(parsed[0][0])) return { type: "Polygon", coordinates: parsed };
       }
     } catch {
-      // ignore
+      const parsedPairs = parseCoordinatePairsString(coordValue);
+      if (parsedPairs) return parsedPairs;
     }
   }
   return null;
