@@ -33,10 +33,17 @@
       </div>
 
       <div class="dataset-toolbar">
-        <label class="secondary action-button upload-btn">
+        <button class="secondary action-button" type="button" @click="triggerFilePicker" :disabled="isProcessing">
           上传文件
-          <input type="file" accept=".geojson,.json,.csv" @change="handleFileUpload" :disabled="isProcessing" />
-        </label>
+        </button>
+        <input
+          ref="dataFileInput"
+          class="visually-hidden"
+          type="file"
+          accept=".geojson,.json,.csv"
+          :disabled="isProcessing"
+          @change="handleFileUpload"
+        />
         <button class="secondary action-button" type="button" @click="showPaste = !showPaste" :disabled="isProcessing">粘贴数据</button>
         <button class="secondary" type="button" @click="activateDrawPoint" :disabled="isProcessing">地图绘制点</button>
       </div>
@@ -131,6 +138,7 @@ const mapReady = ref(false);
 const showPaste = ref(false);
 const pasteInput = ref("");
 const isProcessing = ref(false);
+const dataFileInput = ref(null);
 
 const datasets = ref([{ id: 1, name: "数据集 1", rows: [], extraColumns: [] }]);
 const activeDatasetId = ref(1);
@@ -671,6 +679,10 @@ const importFeaturesWithMask = async (rawText) => {
   } finally {
     isProcessing.value = false;
   }
+};
+
+const triggerFilePicker = () => {
+  dataFileInput.value?.click();
 };
 
 const handleFileUpload = async (event) => {
