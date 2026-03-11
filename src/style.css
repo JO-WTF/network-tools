@@ -834,3 +834,21 @@ button:not(:disabled):hover {
   justify-content: flex-end;
   gap: 8px;
 }
+
+
+.cell-value-btn {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #334155;
+}
+
+.cell-editor {
+  width: 100%;
+  border: 1px solid #cbd5f5;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+}

@@ -103,6 +103,14 @@
           <button
             type="button"
             class="secondary small"
+            :class="{ active: geometryFilter === 'all' }"
+            @click="setGeometryFilter('all')"
+          >
+            全部
+          </button>
+          <button
+            type="button"
+            class="secondary small"
             :class="{ active: geometryFilter === 'point' }"
             @click="setGeometryFilter('point')"
           >
@@ -124,6 +132,7 @@
           >
             面
           </button>
+          <button type="button" class="secondary small" @click="addColumnField">新增字段</button>
         </div>
         <div class="pager-row">
           <button class="secondary small" type="button" :disabled="currentPage <= 1" @click="changePage(currentPage - 1)">上一页</button>
@@ -154,7 +163,21 @@
               <td>
                 <span class="geometry-badge">{{ row.geometryType }}</span>
               </td>
-              <td v-for="col in activeDataset.extraColumns" :key="col">{{ row.properties[col] ?? '-' }}</td>
+              <td v-for="col in activeDataset.extraColumns" :key="col">
+                <template v-if="isEditingCell(row.featureKey, col)">
+                  <input
+                    class="cell-editor"
+                    :value="editingValue"
+                    @input="editingValue = $event.target.value"
+                    @blur="saveEditCell(row, col)"
+                    @keydown.enter.prevent="saveEditCell(row, col)"
+                    @keydown.esc.prevent="cancelEditCell"
+                  />
+                </template>
+                <button v-else class="cell-value-btn" type="button" @click="startEditCell(row, col)">
+                  {{ row.properties[col] ?? '-' }}
+                </button>
+              </td>
               <td><button class="secondary small" type="button" @click="locateFeature(row)">定位</button></td>
               <td><button class="secondary small" type="button" @click="removeFeature(row.featureKey)">删除</button></td>
             </tr>
@@ -228,9 +251,11 @@ const styleConfigDatasetId = ref(null);
 const styleDraft = ref(createDefaultDatasetStyle());
 const activeDatasetId = ref(1);
 const selectedFeatureKey = ref("");
-const geometryFilter = ref("point");
+const geometryFilter = ref("all");
 const currentPage = ref(1);
 const pageSize = 20;
+const editingCell = ref({ featureKey: "", column: "" });
+const editingValue = ref("");
 
 const rowElementMap = new Map();
 let featureCounter = 1;
@@ -262,7 +287,9 @@ const sortedRows = computed(() => {
 });
 
 const filteredRows = computed(() =>
-  sortedRows.value.filter((row) => resolveGeometryGroup(row.geometryType) === geometryFilter.value)
+  geometryFilter.value === "all"
+    ? sortedRows.value
+    : sortedRows.value.filter((row) => resolveGeometryGroup(row.geometryType) === geometryFilter.value)
 );
 
 const totalPages = computed(() => Math.max(Math.ceil(filteredRows.value.length / pageSize), 1));
@@ -341,14 +368,14 @@ const commitDrawingByMode = () => {
 };
 
 const ensureValidGeometryFilter = () => {
+  if (geometryFilter.value === "all") return;
   const available = new Set((activeDataset.value?.rows || []).map((row) => resolveGeometryGroup(row.geometryType)).filter(Boolean));
-  if (!available.size) return;
+  if (!available.size) {
+    geometryFilter.value = "all";
+    return;
+  }
   if (!available.has(geometryFilter.value)) {
-    geometryFilter.value = available.has("point")
-      ? "point"
-      : available.has("line")
-        ? "line"
-        : "polygon";
+    geometryFilter.value = "all";
   }
 };
 
@@ -359,6 +386,47 @@ const setGeometryFilter = (group) => {
 
 const changePage = (page) => {
   currentPage.value = Math.min(Math.max(page, 1), totalPages.value);
+};
+
+const isEditingCell = (featureKey, column) =>
+  editingCell.value.featureKey === featureKey && editingCell.value.column === column;
+
+const startEditCell = (row, column) => {
+  editingCell.value = { featureKey: row.featureKey, column };
+  editingValue.value = row.properties?.[column] ?? "";
+};
+
+const cancelEditCell = () => {
+  editingCell.value = { featureKey: "", column: "" };
+  editingValue.value = "";
+};
+
+const saveEditCell = (row, column) => {
+  if (!isEditingCell(row.featureKey, column)) return;
+  row.properties[column] = editingValue.value;
+  if (row.feature?.properties) {
+    row.feature.properties[column] = editingValue.value;
+  }
+  cancelEditCell();
+};
+
+const addColumnField = () => {
+  if (!activeDataset.value) return;
+  const input = window.prompt("请输入新增字段名称");
+  const column = (input || "").trim();
+  if (!column) return;
+  const lower = column.toLowerCase();
+  if (["gid", "geometry"].includes(lower) || lower.startsWith("__")) return;
+  if (activeDataset.value.extraColumns.includes(column)) return;
+  activeDataset.value.extraColumns = [...activeDataset.value.extraColumns, column];
+  activeDataset.value.rows.forEach((row) => {
+    if (!(column in row.properties)) {
+      row.properties[column] = "";
+      if (row.feature?.properties) {
+        row.feature.properties[column] = "";
+      }
+    }
+  });
 };
 
 const ensureSelectedRowVisible = (featureKey) => {
@@ -1054,6 +1122,7 @@ watch(selectedFeatureKey, () => {
 
 watch(activeDatasetId, () => {
   clearSelection();
+  cancelEditCell();
   ensureValidGeometryFilter();
   currentPage.value = 1;
 });
