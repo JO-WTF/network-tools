@@ -757,3 +757,80 @@ button:not(:disabled):hover {
   border-color: #2563eb;
   color: #fff;
 }
+
+
+.dataset-tabs .mode-button {
+  border: 1px solid #e8edf7;
+  border-radius: 8px;
+}
+
+.dataset-tabs .mode-button.active {
+  border-color: #2563eb;
+}
+
+.dataset-style {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 1px solid #e8edf7;
+  background: #fff;
+  color: #64748b;
+}
+
+.style-modal {
+  width: min(980px, 100%);
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.2);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.style-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.style-modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.style-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.style-column {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.style-column h4 {
+  margin: 0;
+}
+
+.style-column label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.style-column input[type="number"],
+.style-column input[type="color"] {
+  width: 100%;
+}
+
+.style-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

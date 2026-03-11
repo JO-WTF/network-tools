@@ -51,6 +51,15 @@
             {{ dataset.name }} ({{ dataset.rows.length }})
           </button>
           <button
+            class="icon-button dataset-style"
+            type="button"
+            @click="openStyleConfig(dataset.id)"
+            aria-label="数据集样式设置"
+            title="样式设置"
+          >
+            ⚙
+          </button>
+          <button
             v-if="dataset.id === activeDatasetId"
             class="icon-button dataset-delete"
             type="button"
@@ -153,6 +162,41 @@
         </table>
       </div>
     </div>
+    
+    <div v-if="styleConfigDatasetId !== null" class="settings-backdrop" @click.self="closeStyleConfig">
+      <div class="style-modal" role="dialog" aria-modal="true" aria-label="数据集样式设置">
+        <div class="style-modal-header">
+          <h3>数据集样式配置（{{ datasets.find((d) => d.id === styleConfigDatasetId)?.name }}）</h3>
+          <button class="icon-button" type="button" @click="closeStyleConfig">✕</button>
+        </div>
+        <div class="style-columns">
+          <section class="style-column">
+            <h4>点</h4>
+            <label>颜色 <input v-model="styleDraft.point.color" type="color" /></label>
+            <label>半径 <input v-model.number="styleDraft.point.radius" type="number" min="2" max="30" /></label>
+            <label>描边颜色 <input v-model="styleDraft.point.strokeColor" type="color" /></label>
+            <label>描边宽度 <input v-model.number="styleDraft.point.strokeWidth" type="number" min="0" max="10" /></label>
+          </section>
+          <section class="style-column">
+            <h4>线</h4>
+            <label>颜色 <input v-model="styleDraft.line.color" type="color" /></label>
+            <label>线宽 <input v-model.number="styleDraft.line.width" type="number" min="1" max="20" /></label>
+            <label>透明度 <input v-model.number="styleDraft.line.opacity" type="number" min="0" max="1" step="0.1" /></label>
+          </section>
+          <section class="style-column">
+            <h4>面</h4>
+            <label>填充色 <input v-model="styleDraft.polygon.fillColor" type="color" /></label>
+            <label>填充透明度 <input v-model.number="styleDraft.polygon.fillOpacity" type="number" min="0" max="1" step="0.1" /></label>
+            <label>边框色 <input v-model="styleDraft.polygon.lineColor" type="color" /></label>
+            <label>边框宽度 <input v-model.number="styleDraft.polygon.lineWidth" type="number" min="1" max="10" /></label>
+          </section>
+        </div>
+        <div class="style-modal-actions">
+          <button class="secondary" type="button" @click="closeStyleConfig">取消</button>
+          <button class="primary" type="button" @click="saveStyleConfig">保存</button>
+        </div>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -164,6 +208,12 @@ const props = defineProps({
   mapApiKey: { type: String, default: "" },
 });
 
+const createDefaultDatasetStyle = () => ({
+  point: { color: "#f97316", radius: 6, strokeColor: "#ffffff", strokeWidth: 1 },
+  line: { color: "#0ea5e9", width: 3, opacity: 1 },
+  polygon: { fillColor: "#2563eb", fillOpacity: 0.2, lineColor: "#1d4ed8", lineWidth: 1 },
+});
+
 const mapContainer = ref(null);
 const mapReady = ref(false);
 const showPaste = ref(false);
@@ -172,6 +222,9 @@ const isProcessing = ref(false);
 const dataFileInput = ref(null);
 
 const datasets = ref([{ id: 1, name: "数据集 1", rows: [], extraColumns: [] }]);
+const datasetStyles = ref({ 1: createDefaultDatasetStyle() });
+const styleConfigDatasetId = ref(null);
+const styleDraft = ref(createDefaultDatasetStyle());
 const activeDatasetId = ref(1);
 const selectedFeatureKey = ref("");
 const geometryFilter = ref("point");
@@ -338,6 +391,68 @@ const getInteractiveLayerIds = () => [
 ].filter((layerId) => map?.getLayer(layerId));
 
 
+const cloneStyleConfig = (config) => JSON.parse(JSON.stringify(config));
+
+const getDatasetStyle = (datasetId) => datasetStyles.value[datasetId] || createDefaultDatasetStyle();
+
+const buildDatasetMatchExpression = (valueResolver, fallback) => {
+  const expr = ["match", ["to-string", ["coalesce", ["get", "__datasetId"], ""]]];
+  datasets.value.forEach((dataset) => {
+    expr.push(String(dataset.id), valueResolver(dataset.id));
+  });
+  expr.push(fallback);
+  return expr;
+};
+
+const applySharedGeometryStyles = () => {
+  if (!mapReady.value || !map) return;
+  if (map.getLayer("viz-line")) {
+    map.setPaintProperty("viz-line", "line-color", buildDatasetMatchExpression((id) => getDatasetStyle(id).line.color, "#0ea5e9"));
+    map.setPaintProperty("viz-line", "line-width", buildDatasetMatchExpression((id) => getDatasetStyle(id).line.width, 3));
+    map.setPaintProperty("viz-line", "line-opacity", buildDatasetMatchExpression((id) => getDatasetStyle(id).line.opacity, 1));
+  }
+  if (map.getLayer("viz-fill")) {
+    map.setPaintProperty("viz-fill", "fill-color", buildDatasetMatchExpression((id) => getDatasetStyle(id).polygon.fillColor, "#2563eb"));
+    map.setPaintProperty("viz-fill", "fill-opacity", buildDatasetMatchExpression((id) => getDatasetStyle(id).polygon.fillOpacity, 0.2));
+  }
+  if (map.getLayer("viz-polygon-outline")) {
+    map.setPaintProperty("viz-polygon-outline", "line-color", buildDatasetMatchExpression((id) => getDatasetStyle(id).polygon.lineColor, "#1d4ed8"));
+    map.setPaintProperty("viz-polygon-outline", "line-width", buildDatasetMatchExpression((id) => getDatasetStyle(id).polygon.lineWidth, 1));
+  }
+};
+
+const applyDatasetPointStyle = (datasetId) => {
+  if (!mapReady.value || !map) return;
+  const layerId = getDatasetPointLayerId(datasetId);
+  const style = getDatasetStyle(datasetId).point;
+  if (!map.getLayer(layerId)) return;
+  map.setPaintProperty(layerId, "circle-color", style.color);
+  map.setPaintProperty(layerId, "circle-radius", style.radius);
+  map.setPaintProperty(layerId, "circle-stroke-color", style.strokeColor);
+  map.setPaintProperty(layerId, "circle-stroke-width", style.strokeWidth);
+};
+
+const openStyleConfig = (datasetId) => {
+  styleConfigDatasetId.value = datasetId;
+  styleDraft.value = cloneStyleConfig(getDatasetStyle(datasetId));
+};
+
+const closeStyleConfig = () => {
+  styleConfigDatasetId.value = null;
+};
+
+const saveStyleConfig = () => {
+  const datasetId = styleConfigDatasetId.value;
+  if (datasetId == null) return;
+  datasetStyles.value = {
+    ...datasetStyles.value,
+    [datasetId]: cloneStyleConfig(styleDraft.value),
+  };
+  applyDatasetPointStyle(datasetId);
+  applySharedGeometryStyles();
+  closeStyleConfig();
+};
+
 const ensureDatasetPointLayer = (datasetId) => {
   if (!mapReady.value || !map) return;
   const sourceId = getDatasetPointSourceId(datasetId);
@@ -364,6 +479,7 @@ const ensureDatasetPointLayer = (datasetId) => {
     });
   }
 
+  applyDatasetPointStyle(datasetId);
 };
 
 const removeDatasetPointLayer = (datasetId) => {
@@ -487,6 +603,7 @@ const ensureMap = () => {
     });
 
 
+    applySharedGeometryStyles();
     refreshSource();
   });
 };
@@ -736,20 +853,28 @@ const refreshSource = () => {
       .filter((feature) => feature?.geometry?.type === "Point");
     map.getSource(sourceId)?.setData({ type: "FeatureCollection", features: pointFeatures });
   });
+  applySharedGeometryStyles();
 };
 
 const addDataset = () => {
   const nextId = Math.max(...datasets.value.map((dataset) => dataset.id)) + 1;
   datasets.value.push({ id: nextId, name: `数据集 ${nextId}`, rows: [], extraColumns: [] });
+  datasetStyles.value = { ...datasetStyles.value, [nextId]: createDefaultDatasetStyle() };
   activeDatasetId.value = nextId;
 };
 
 const removeDataset = (datasetId) => {
   if (datasets.value.length <= 1) return;
   datasets.value = datasets.value.filter((dataset) => dataset.id !== datasetId);
+  const nextStyles = { ...datasetStyles.value };
+  delete nextStyles[datasetId];
+  datasetStyles.value = nextStyles;
   removeDatasetPointLayer(datasetId);
   if (activeDatasetId.value === datasetId) {
     activeDatasetId.value = datasets.value[0]?.id ?? 1;
+  }
+  if (styleConfigDatasetId.value === datasetId) {
+    closeStyleConfig();
   }
   clearSelection();
   refreshSource();
