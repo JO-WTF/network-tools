@@ -6,6 +6,38 @@
       <div v-if="isProcessing" class="visual-map-mask">
         <div class="mask-card">正在处理数据并加载地图要素...</div>
       </div>
+      <div class="draw-fab-group">
+        <button
+          class="draw-fab"
+          :class="{ active: drawMode === 'point' }"
+          type="button"
+          :disabled="isProcessing"
+          title="绘制点"
+          @click="toggleDrawMode('point')"
+        >
+          ●
+        </button>
+        <button
+          class="draw-fab"
+          :class="{ active: drawMode === 'line' }"
+          type="button"
+          :disabled="isProcessing"
+          title="绘制线"
+          @click="toggleDrawMode('line')"
+        >
+          ／
+        </button>
+        <button
+          class="draw-fab"
+          :class="{ active: drawMode === 'polygon' }"
+          type="button"
+          :disabled="isProcessing"
+          title="绘制面"
+          @click="toggleDrawMode('polygon')"
+        >
+          ⬠
+        </button>
+      </div>
     </div>
 
     <div class="visual-bottom">
@@ -45,8 +77,7 @@
           @change="handleFileUpload"
         />
         <button class="secondary action-button" type="button" @click="showPaste = !showPaste" :disabled="isProcessing">粘贴数据</button>
-        <button class="secondary" type="button" @click="activateDrawPoint" :disabled="isProcessing">地图绘制点</button>
-      </div>
+              </div>
 
       <div v-if="showPaste" class="paste-box">
         <textarea
@@ -150,7 +181,8 @@ const pageSize = 20;
 const rowElementMap = new Map();
 let featureCounter = 1;
 let map = null;
-let drawPointMode = false;
+const drawMode = ref("none");
+const drawingCoords = ref([]);
 let mapPopup = null;
 const pointLayerPrefix = "viz-dataset-point-layer-";
 const pointSourcePrefix = "viz-dataset-point-source-";
@@ -213,6 +245,46 @@ const syncHighlightFilters = () => {
 };
 
 
+
+
+const toggleDrawMode = (mode) => {
+  if (drawMode.value === mode) {
+    drawMode.value = "none";
+    drawingCoords.value = [];
+    return;
+  }
+  drawMode.value = mode;
+  drawingCoords.value = [];
+};
+
+const commitDrawingByMode = () => {
+  if (drawMode.value === "line" && drawingCoords.value.length >= 2) {
+    appendRowsFromFeatures([
+      {
+        type: "Feature",
+        geometry: { type: "LineString", coordinates: [...drawingCoords.value] },
+        properties: {},
+      },
+    ]);
+    return true;
+  }
+  if (drawMode.value === "polygon" && drawingCoords.value.length >= 3) {
+    const first = drawingCoords.value[0];
+    const last = drawingCoords.value[drawingCoords.value.length - 1];
+    const ring = first[0] === last[0] && first[1] === last[1]
+      ? [...drawingCoords.value]
+      : [...drawingCoords.value, first];
+    appendRowsFromFeatures([
+      {
+        type: "Feature",
+        geometry: { type: "Polygon", coordinates: [ring] },
+        properties: {},
+      },
+    ]);
+    return true;
+  }
+  return false;
+};
 
 const ensureValidGeometryFilter = () => {
   const available = new Set((activeDataset.value?.rows || []).map((row) => resolveGeometryGroup(row.geometryType)).filter(Boolean));
@@ -372,7 +444,7 @@ const ensureMap = () => {
     });
 
     map.on("click", (event) => {
-      if (drawPointMode) {
+      if (drawMode.value === "point") {
         appendRowsFromFeatures([
           {
             type: "Feature",
@@ -380,15 +452,36 @@ const ensureMap = () => {
             properties: {},
           },
         ]);
-        drawPointMode = false;
+        drawMode.value = "none";
+        drawingCoords.value = [];
         return;
       }
+
+      if (drawMode.value === "line" || drawMode.value === "polygon") {
+        drawingCoords.value = [...drawingCoords.value, [event.lngLat.lng, event.lngLat.lat]];
+        return;
+      }
+
       const hits = map.queryRenderedFeatures(event.point, { layers: getInteractiveLayerIds() });
       if (!hits.length) return clearSelection();
       selectFeatureFromMap(hits[0], event.lngLat);
     });
 
+    map.on("dblclick", (event) => {
+      if (drawMode.value !== "line" && drawMode.value !== "polygon") return;
+      event.preventDefault();
+      const committed = commitDrawingByMode();
+      if (committed) {
+        drawMode.value = "none";
+      }
+      drawingCoords.value = [];
+    });
+
     map.on("mousemove", (event) => {
+      if (drawMode.value !== "none") {
+        map.getCanvas().style.cursor = "crosshair";
+        return;
+      }
       const hits = map.queryRenderedFeatures(event.point, { layers: getInteractiveLayerIds() });
       map.getCanvas().style.cursor = hits.length ? "pointer" : "";
     });
@@ -817,10 +910,6 @@ const removeFeature = (featureKey) => {
   refreshSource();
 };
 
-const activateDrawPoint = () => {
-  drawPointMode = true;
-};
-
 onMounted(() => {
   ensureMap();
 });
@@ -846,6 +935,20 @@ watch(totalPages, (value) => {
   if (currentPage.value > value) {
     currentPage.value = value;
   }
+});
+
+
+watch(drawMode, (mode) => {
+  if (!map) return;
+  if (mode === "line" || mode === "polygon") {
+    map.doubleClickZoom.disable();
+  } else {
+    map.doubleClickZoom.enable();
+  }
+  if (mode === "none") {
+    drawingCoords.value = [];
+  }
+  map.getCanvas().style.cursor = mode === "none" ? "" : "crosshair";
 });
 
 onBeforeUnmount(() => {
