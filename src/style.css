@@ -460,16 +460,118 @@ button:not(:disabled):hover {
 .map-panel {
   position: relative;
   height: 100%;
+  min-height: 0;
+}
+
+.map-visualization {
+  display: grid;
+  grid-template-rows: minmax(220px, calc(var(--map-split-percent, 62) * 1%)) 22px minmax(240px, 1fr);
+  height: 100%;
+  gap: 0;
 }
 
 .map-wrapper {
-  position: sticky;
-  top: 24px;
+  position: relative;
   height: 100%;
   background: #0f172a;
-  border-radius: 20px;
+  border-radius: 20px 20px 0 0;
   overflow: hidden;
   box-shadow: 0 16px 32px rgba(15, 23, 42, 0.2);
+}
+
+.map-resizer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f172a;
+}
+
+.map-resizer input {
+  width: 94%;
+}
+
+.dataset-panel {
+  border-radius: 0 0 20px 20px;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.2);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.dataset-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  overflow-x: auto;
+}
+
+.dataset-tab {
+  border-radius: 999px;
+  border: 1px solid #cbd5f5;
+  background: #eef2ff;
+  color: #334155;
+  white-space: nowrap;
+}
+
+.dataset-tab.active {
+  background: #2563eb;
+  color: #fff;
+  box-shadow: 0 8px 14px rgba(37, 99, 235, 0.25);
+}
+
+.dataset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.upload-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.upload-button input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.paste-area {
+  width: 100%;
+  min-height: 86px;
+  border: 1px solid #cbd5f5;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.dataset-table-wrapper {
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.dataset-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.dataset-table th,
+.dataset-table td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 8px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
 }
 
 .map {
@@ -536,8 +638,7 @@ button:not(:disabled):hover {
     grid-template-columns: 1fr;
   }
 
-  .map-wrapper {
-    position: relative;
-    height: 420px;
+  .map-visualization {
+    grid-template-rows: 300px 22px 1fr;
   }
 }

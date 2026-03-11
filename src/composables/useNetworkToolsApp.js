@@ -64,6 +64,22 @@ const geocodeState = reactive({
 const points = ref([]);
 const routeLines = ref([]);
 const mode = ref("geocode");
+const mapDatasets = ref([createEmptyDataset(1)]);
+const activeDatasetId = ref(1);
+const nextDatasetId = ref(2);
+const datasetSourceId = "dataset-features";
+const mapSplitPercent = ref(62);
+const drawMode = ref("none");
+const drawingCoords = ref([]);
+
+function createEmptyDataset(id) {
+  return {
+    id,
+    name: `数据集 ${id}`,
+    rows: [],
+    columns: ["GID", "GEOMETRY"],
+  };
+}
 
 const modeOptions = [
   { value: "geocode", label: "地址编码" },
@@ -75,6 +91,7 @@ let mapInstance = null;
 let mapMarkers = [];
 let routePopup = null;
 let routeHoverHandlers = null;
+let mapDrawClickHandler = null;
 
 const storageKeys = {
   provider: "geocode_provider",
@@ -102,6 +119,19 @@ const storageKeys = {
 
 const getProviderStorageKey = (currentProvider) =>
   currentProvider === "mapbox" ? storageKeys.mapboxGeocode : storageKeys.hereGeocode;
+
+const activeDataset = computed(() =>
+  mapDatasets.value.find((dataset) => dataset.id === activeDatasetId.value) ?? mapDatasets.value[0]
+);
+
+const clampSplitPercent = (value) => Math.min(82, Math.max(35, Number(value) || 62));
+
+const sanitizeField = (value) => String(value ?? "").trim();
+
+const isLikelyLngField = (key) => /^(lng|lon|long|longitude|x)$/i.test(key);
+const isLikelyLatField = (key) => /^(lat|latitude|y)$/i.test(key);
+const isLikelyCoordsField = (key) => /(coord|coordinates|lnglat|latlng|location|point)/i.test(key);
+const isLikelyWktField = (key) => /(wkt|geometry|geom|shape|polygon|linestring|point)/i.test(key);
 
 const normalizeCoordinate = (value) => {
   const num = Number(value);
@@ -1717,6 +1747,227 @@ const downloadExcel = () => {
   XLSX.writeFile(workbook, `geocode_${fileName.value || "result.xlsx"}`);
 };
 
+const setMapSplitPercent = (value) => {
+  mapSplitPercent.value = clampSplitPercent(value);
+};
+
+const addDataset = () => {
+  const id = nextDatasetId.value++;
+  mapDatasets.value.push(createEmptyDataset(id));
+  activeDatasetId.value = id;
+};
+
+const setActiveDataset = (id) => {
+  activeDatasetId.value = id;
+};
+
+const updateDatasetTable = (dataset, rowsData) => {
+  const fieldSet = new Set(["GID", "GEOMETRY"]);
+  rowsData.forEach((row) => {
+    Object.keys(row).forEach((key) => fieldSet.add(key));
+  });
+  dataset.rows = rowsData;
+  dataset.columns = Array.from(fieldSet);
+};
+
+const parseCsvText = (text) => {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2) return [];
+  const splitCsvLine = (line) => {
+    const values = [];
+    let current = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i += 1) {
+      const char = line[i];
+      if (char === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          current += '"';
+          i += 1;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === "," && !inQuotes) {
+        values.push(current.trim());
+        current = "";
+      } else {
+        current += char;
+      }
+    }
+    values.push(current.trim());
+    return values;
+  };
+  const headersCsv = splitCsvLine(lines[0]).map((item, index) => item || `field_${index + 1}`);
+  return lines.slice(1).map((line) => {
+    const values = splitCsvLine(line);
+    const row = {};
+    headersCsv.forEach((header, index) => {
+      row[header] = sanitizeField(values[index]);
+    });
+    return row;
+  });
+};
+
+const parseWktGeometry = (value) => {
+  if (!value) return null;
+  const input = String(value).trim();
+  const pointMatch = input.match(/^POINT\s*\(([^\)]+)\)$/i);
+  if (pointMatch) {
+    const [lng, lat] = pointMatch[1].trim().split(/\s+/).map(Number);
+    if (Number.isFinite(lng) && Number.isFinite(lat)) {
+      return { type: "Point", coordinates: [lng, lat] };
+    }
+  }
+  const lineMatch = input.match(/^LINESTRING\s*\((.+)\)$/i);
+  if (lineMatch) {
+    const coords = lineMatch[1]
+      .split(",")
+      .map((pair) => pair.trim().split(/\s+/).map(Number))
+      .filter((pair) => pair.length >= 2 && Number.isFinite(pair[0]) && Number.isFinite(pair[1]))
+      .map(([lng, lat]) => [lng, lat]);
+    if (coords.length >= 2) {
+      return { type: "LineString", coordinates: coords };
+    }
+  }
+  const polygonMatch = input.match(/^POLYGON\s*\(\((.+)\)\)$/i);
+  if (polygonMatch) {
+    const ring = polygonMatch[1]
+      .split(",")
+      .map((pair) => pair.trim().split(/\s+/).map(Number))
+      .filter((pair) => pair.length >= 2 && Number.isFinite(pair[0]) && Number.isFinite(pair[1]))
+      .map(([lng, lat]) => [lng, lat]);
+    if (ring.length >= 3) {
+      const closed =
+        ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1]
+          ? ring
+          : [...ring, ring[0]];
+      return { type: "Polygon", coordinates: [closed] };
+    }
+  }
+  return null;
+};
+
+const tryParseLngLatFromText = (value) => {
+  if (!value) return null;
+  const nums = String(value)
+    .match(/-?\d+(?:\.\d+)?/g)
+    ?.map(Number)
+    .filter(Number.isFinite);
+  if (!nums || nums.length < 2) return null;
+  const [first, second] = nums;
+  if (Math.abs(first) <= 180 && Math.abs(second) <= 90) return [first, second];
+  if (Math.abs(first) <= 90 && Math.abs(second) <= 180) return [second, first];
+  return null;
+};
+
+const geometryTypeLabel = (geometry) => geometry?.type || "Unknown";
+
+const normalizeImportedRows = (rawRows) => {
+  const result = [];
+  rawRows.forEach((rawRow, index) => {
+    const row = { GID: index + 1 };
+    Object.entries(rawRow || {}).forEach(([key, value]) => {
+      row[key] = value;
+    });
+
+    let geometry = null;
+    const entries = Object.entries(rawRow || {});
+    const lngField = entries.find(([key]) => isLikelyLngField(key));
+    const latField = entries.find(([key]) => isLikelyLatField(key));
+    if (lngField && latField) {
+      const lng = Number(lngField[1]);
+      const lat = Number(latField[1]);
+      if (Number.isFinite(lng) && Number.isFinite(lat)) {
+        geometry = { type: "Point", coordinates: [lng, lat] };
+      }
+    }
+
+    if (!geometry) {
+      const coordsField = entries.find(([key]) => isLikelyCoordsField(key));
+      const pair = tryParseLngLatFromText(coordsField?.[1]);
+      if (pair) {
+        geometry = { type: "Point", coordinates: pair };
+      }
+    }
+
+    if (!geometry) {
+      const wktField = entries.find(([key]) => isLikelyWktField(key));
+      const parsedWkt = parseWktGeometry(wktField?.[1]);
+      if (parsedWkt) geometry = parsedWkt;
+    }
+
+    if (!geometry && rawRow?.geometry?.type && rawRow?.geometry?.coordinates) {
+      geometry = rawRow.geometry;
+    }
+
+    row.GEOMETRY = geometryTypeLabel(geometry);
+    row.__geometry = geometry;
+    result.push(row);
+  });
+  return result;
+};
+
+const loadDatasetRows = (rawRows) => {
+  if (!activeDataset.value) return;
+  const normalizedRows = normalizeImportedRows(rawRows);
+  updateDatasetTable(activeDataset.value, normalizedRows);
+  refreshDatasetLayer();
+};
+
+const readDatasetFile = (event) => {
+  const [file] = event.target.files || [];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const text = String(reader.result || "");
+    if (file.name.toLowerCase().endsWith(".geojson") || text.trim().startsWith("{")) {
+      try {
+        const parsed = JSON.parse(text);
+        const features = parsed.type === "FeatureCollection" ? parsed.features || [] : [];
+        const rawRows = features.map((feature) => ({
+          ...(feature.properties || {}),
+          geometry: feature.geometry,
+        }));
+        loadDatasetRows(rawRows);
+      } catch (error) {
+        logs.value.unshift({ id: Date.now(), title: "地图数据", error: "GeoJSON 解析失败", message: String(error) });
+      }
+      return;
+    }
+    const csvRows = parseCsvText(text);
+    loadDatasetRows(csvRows);
+  };
+  reader.readAsText(file);
+  event.target.value = "";
+};
+
+const parsePastedData = (text) => {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return;
+  try {
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      const parsed = JSON.parse(trimmed);
+      if (parsed.type === "FeatureCollection") {
+        const rawRows = (parsed.features || []).map((feature) => ({
+          ...(feature.properties || {}),
+          geometry: feature.geometry,
+        }));
+        loadDatasetRows(rawRows);
+        return;
+      }
+    }
+  } catch (error) {
+    // fallback
+  }
+  if (/^(POINT|LINESTRING|POLYGON|MULTIPOLYGON)/i.test(trimmed)) {
+    loadDatasetRows([{ wkt: trimmed }]);
+    return;
+  }
+  loadDatasetRows(parseCsvText(trimmed));
+};
+
 const getOutputHeaders = () => {
   if (mode.value === "reverse") {
     return [...headers.value, "解析地址", "一级行政区", "二级行政区", "三级行政区"];
@@ -1745,7 +1996,129 @@ const initMap = () => {
   mapInstance.on("load", () => {
     mapLoaded.value = true;
     refreshMarkers();
+    refreshDatasetLayer();
+    bindDrawInteraction();
   });
+};
+
+const getDatasetFeatures = () => {
+  return mapDatasets.value.flatMap((dataset) =>
+    dataset.rows
+      .filter((row) => row.__geometry)
+      .map((row) => ({
+        type: "Feature",
+        properties: {
+          datasetId: dataset.id,
+          datasetName: dataset.name,
+          gid: row.GID,
+        },
+        geometry: row.__geometry,
+      }))
+  );
+};
+
+const refreshDatasetLayer = () => {
+  if (!mapInstance || !mapLoaded.value) return;
+  const existingSource = mapInstance.getSource(datasetSourceId);
+  const data = {
+    type: "FeatureCollection",
+    features: getDatasetFeatures(),
+  };
+  if (existingSource) {
+    existingSource.setData(data);
+    return;
+  }
+  mapInstance.addSource(datasetSourceId, { type: "geojson", data });
+  mapInstance.addLayer({
+    id: `${datasetSourceId}-fill`,
+    type: "fill",
+    source: datasetSourceId,
+    filter: ["==", ["geometry-type"], "Polygon"],
+    paint: { "fill-color": "#38bdf8", "fill-opacity": 0.2 },
+  });
+  mapInstance.addLayer({
+    id: `${datasetSourceId}-line`,
+    type: "line",
+    source: datasetSourceId,
+    filter: ["in", ["geometry-type"], ["literal", ["LineString", "Polygon", "MultiPolygon"]]],
+    paint: { "line-color": "#0ea5e9", "line-width": 2 },
+  });
+  mapInstance.addLayer({
+    id: `${datasetSourceId}-point`,
+    type: "circle",
+    source: datasetSourceId,
+    filter: ["==", ["geometry-type"], "Point"],
+    paint: { "circle-color": "#f97316", "circle-radius": 6, "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 },
+  });
+};
+
+const deleteDatasetRow = (datasetId, gid) => {
+  const dataset = mapDatasets.value.find((item) => item.id === datasetId);
+  if (!dataset) return;
+  dataset.rows = dataset.rows.filter((row) => row.GID !== gid);
+  refreshDatasetLayer();
+};
+
+const zoomToDatasetRow = (datasetId, gid) => {
+  if (!mapInstance) return;
+  const dataset = mapDatasets.value.find((item) => item.id === datasetId);
+  const row = dataset?.rows.find((item) => item.GID === gid);
+  const geometry = row?.__geometry;
+  if (!geometry) return;
+  if (geometry.type === "Point") {
+    mapInstance.easeTo({ center: geometry.coordinates, zoom: 12 });
+  }
+};
+
+const startDraw = (modeValue) => {
+  drawMode.value = modeValue;
+  drawingCoords.value = [];
+  bindDrawInteraction();
+};
+
+const finishDrawing = () => {
+  if (!activeDataset.value || !drawingCoords.value.length) return;
+  let geometry = null;
+  if (drawMode.value === "point" && drawingCoords.value[0]) {
+    geometry = { type: "Point", coordinates: drawingCoords.value[0] };
+  } else if (drawMode.value === "line" && drawingCoords.value.length >= 2) {
+    geometry = { type: "LineString", coordinates: [...drawingCoords.value] };
+  } else if (drawMode.value === "polygon" && drawingCoords.value.length >= 3) {
+    geometry = { type: "Polygon", coordinates: [[...drawingCoords.value, drawingCoords.value[0]]] };
+  }
+  if (geometry) {
+    const newRow = {
+      GID: activeDataset.value.rows.length + 1,
+      GEOMETRY: geometry.type,
+      __geometry: geometry,
+    };
+    activeDataset.value.rows.push(newRow);
+    updateDatasetTable(activeDataset.value, activeDataset.value.rows);
+    refreshDatasetLayer();
+  }
+  drawMode.value = "none";
+  drawingCoords.value = [];
+  bindDrawInteraction();
+};
+
+const bindDrawInteraction = () => {
+  if (!mapInstance || !mapLoaded.value) return;
+  if (mapDrawClickHandler) {
+    mapInstance.off("click", mapDrawClickHandler);
+    mapDrawClickHandler = null;
+  }
+  if (drawMode.value === "none") {
+    mapInstance.getCanvas().style.cursor = "";
+    return;
+  }
+  mapInstance.getCanvas().style.cursor = "crosshair";
+  mapDrawClickHandler = (event) => {
+    drawingCoords.value = [...drawingCoords.value, [event.lngLat.lng, event.lngLat.lat]];
+    if (drawMode.value === "point") {
+      finishDrawing();
+    }
+  };
+  mapInstance.on("click", mapDrawClickHandler);
 };
 
 const refreshMarkers = () => {
@@ -2237,6 +2610,18 @@ watch(mode, (value) => {
   resetResults();
 });
 
+watch(drawMode, () => {
+  bindDrawInteraction();
+});
+
+watch(
+  mapDatasets,
+  () => {
+    refreshDatasetLayer();
+  },
+  { deep: true }
+);
+
   return {
     headers,
     rows,
@@ -2270,6 +2655,11 @@ watch(mode, (value) => {
     configFileInput,
     mapContainer,
     mapLoaded,
+    mapDatasets,
+    activeDataset,
+    activeDatasetId,
+    mapSplitPercent,
+    drawMode,
     isDragging,
     dropzoneFlash,
     mockAnimating,
@@ -2294,6 +2684,15 @@ watch(mode, (value) => {
     triggerConfigImport,
     handleConfigFileChange,
     exportSettings,
-    closeCustomSocket
+    closeCustomSocket,
+    setMapSplitPercent,
+    addDataset,
+    setActiveDataset,
+    readDatasetFile,
+    parsePastedData,
+    deleteDatasetRow,
+    zoomToDatasetRow,
+    startDraw,
+    finishDrawing,
   };
 }

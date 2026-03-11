@@ -193,15 +193,77 @@
       </section>
 
       <section class="map-panel">
-        <div class="map-wrapper">
-          <div ref="mapContainer" class="map"></div>
-          <div v-if="!mapLoaded" class="map-config">
-            <h3>地图配置</h3>
-            <p class="hint">请在设置中填写 Mapbox API Key。</p>
-            <button class="secondary" @click="showSettings = true">打开设置</button>
+        <div class="map-visualization" :style="{ '--map-split-percent': `${mapSplitPercent}%` }">
+          <div class="map-wrapper">
+            <div ref="mapContainer" class="map"></div>
+            <div v-if="!mapLoaded" class="map-config">
+              <h3>地图配置</h3>
+              <p class="hint">请在设置中填写 Mapbox API Key。</p>
+              <button class="secondary" @click="showSettings = true">打开设置</button>
+            </div>
+            <div v-if="!mapLoaded" class="map-empty">
+              <p>请在设置中填写 Mapbox API Key 以加载地图。</p>
+            </div>
           </div>
-          <div v-if="!mapLoaded" class="map-empty">
-            <p>请在设置中填写 Mapbox API Key 以加载地图。</p>
+          <div class="map-resizer">
+            <input
+              type="range"
+              min="35"
+              max="82"
+              :value="mapSplitPercent"
+              @input="setMapSplitPercent(Number($event.target.value))"
+            />
+          </div>
+          <div class="dataset-panel card">
+            <div class="dataset-tabs">
+              <button
+                v-for="dataset in mapDatasets"
+                :key="dataset.id"
+                type="button"
+                class="dataset-tab"
+                :class="{ active: dataset.id === activeDatasetId }"
+                @click="setActiveDataset(dataset.id)"
+              >
+                {{ dataset.name }}
+              </button>
+              <button class="secondary" type="button" @click="addDataset">+ 添加数据集</button>
+            </div>
+            <div class="dataset-actions">
+              <label class="secondary upload-button">
+                上传文件
+                <input type="file" accept=".geojson,.csv" @change="readDatasetFile" />
+              </label>
+              <button class="secondary" type="button" @click="openPasteDialog = !openPasteDialog">粘贴数据</button>
+              <button class="secondary" type="button" @click="startDraw('point')">绘制点</button>
+              <button class="secondary" type="button" @click="startDraw('line')">绘制线</button>
+              <button class="secondary" type="button" @click="startDraw('polygon')">绘制面</button>
+              <button class="primary" type="button" :disabled="drawMode === 'none'" @click="finishDrawing">完成绘制</button>
+            </div>
+            <textarea
+              v-if="openPasteDialog"
+              class="paste-area"
+              placeholder="粘贴 GeoJSON / CSV / WKT"
+              @change="parsePastedData($event.target.value)"
+            />
+            <div class="dataset-table-wrapper" v-if="activeDataset">
+              <table class="dataset-table">
+                <thead>
+                  <tr>
+                    <th v-for="column in activeDataset.columns" :key="column">{{ column }}</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in activeDataset.rows" :key="row.GID">
+                    <td v-for="column in activeDataset.columns" :key="`${row.GID}-${column}`">{{ row[column] ?? "" }}</td>
+                    <td class="row-actions">
+                      <button class="ghost" type="button" @click="zoomToDatasetRow(activeDataset.id, row.GID)">定位</button>
+                      <button class="ghost" type="button" @click="deleteDatasetRow(activeDataset.id, row.GID)">删除</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </section>
@@ -284,10 +346,13 @@
 </template>
 
 <script setup>
+import { ref } from "vue";
 import AppHeader from "./components/AppHeader.vue";
 import ProgressCard from "./components/ProgressCard.vue";
 import LogCard from "./components/LogCard.vue";
 import { useNetworkToolsApp } from "./composables/useNetworkToolsApp";
+
+const openPasteDialog = ref(false);
 
 const {
   headers,
@@ -319,6 +384,11 @@ const {
   configFileInput,
   mapContainer,
   mapLoaded,
+  mapDatasets,
+  activeDataset,
+  activeDatasetId,
+  mapSplitPercent,
+  drawMode,
   isDragging,
   dropzoneFlash,
   mockAnimating,
@@ -341,5 +411,14 @@ const {
   triggerConfigImport,
   handleConfigFileChange,
   exportSettings,
+  setMapSplitPercent,
+  addDataset,
+  setActiveDataset,
+  readDatasetFile,
+  parsePastedData,
+  deleteDatasetRow,
+  zoomToDatasetRow,
+  startDraw,
+  finishDrawing,
 } = useNetworkToolsApp();
 </script>
