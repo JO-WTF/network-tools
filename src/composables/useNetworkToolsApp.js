@@ -1,4 +1,4 @@
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import mapboxgl from "mapbox-gl";
 import * as XLSX from "xlsx";
 
@@ -47,6 +47,90 @@ const configFileInput = ref(null);
 const geocodeCache = new Map();
 const reverseCache = new Map();
 const routeCache = new Map();
+const PERSISTENT_CACHE_BATCH = 100;
+const persistentCacheBuckets = {
+  geocode: new Map(),
+  reverse: new Map(),
+  route: new Map(),
+};
+
+const buildPersistentScope = (type) => {
+  if (provider.value === "custom") {
+    if (type === "geocode") return `custom|${customGeocodeUrl.value || "default"}`;
+    if (type === "route") return `custom|${customRouteUrl.value || "default"}`;
+    return "custom|reverse";
+  }
+  return `${provider.value}|${type}`;
+};
+
+const getPersistentStorageKey = (type, scope) =>
+  `network_tools_cache_v1_${type}_${encodeURIComponent(scope)}`;
+
+const getPersistentBucket = (type, scope) => {
+  const scopedBuckets = persistentCacheBuckets[type];
+  if (!scopedBuckets) return null;
+  if (scopedBuckets.has(scope)) {
+    return scopedBuckets.get(scope);
+  }
+
+  const storageKey = getPersistentStorageKey(type, scope);
+  let map = new Map();
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        map = new Map(Object.entries(parsed));
+      }
+    }
+  } catch (error) {
+    map = new Map();
+  }
+
+  const bucket = { storageKey, map, pending: 0 };
+  scopedBuckets.set(scope, bucket);
+  return bucket;
+};
+
+const flushPersistentBucket = (bucket) => {
+  if (!bucket || bucket.pending <= 0) return;
+  const serialized = Object.fromEntries(bucket.map.entries());
+  localStorage.setItem(bucket.storageKey, JSON.stringify(serialized));
+  bucket.pending = 0;
+};
+
+const flushAllPersistentCaches = () => {
+  Object.values(persistentCacheBuckets).forEach((scopedBuckets) => {
+    scopedBuckets.forEach((bucket) => {
+      flushPersistentBucket(bucket);
+    });
+  });
+};
+
+const getPersistentCacheValue = (type, requestKey) => {
+  const scope = buildPersistentScope(type);
+  const bucket = getPersistentBucket(type, scope);
+  if (!bucket) return null;
+  return bucket.map.get(requestKey);
+};
+
+const setPersistentCacheValue = (type, requestKey, value) => {
+  if (!requestKey) return;
+  const scope = buildPersistentScope(type);
+  const bucket = getPersistentBucket(type, scope);
+  if (!bucket) return;
+  bucket.map.set(requestKey, value);
+  bucket.pending += 1;
+  if (bucket.pending >= PERSISTENT_CACHE_BATCH) {
+    flushPersistentBucket(bucket);
+  }
+};
+
+
+const cacheAndReturn = (type, requestKey, result) => {
+  setPersistentCacheValue(type, requestKey, result);
+  return result;
+};
 const handledRouteIndices = new Set();
 const renderedPointKeys = new Set();
 const renderedRouteKeys = new Set();
@@ -55,6 +139,7 @@ const mapLoaded = ref(false);
 const isDragging = ref(false);
 const dropzoneFlash = ref(false);
 const mockAnimating = ref(false);
+const mapRealtimeUpdate = ref(true);
 const geocodeState = reactive({
   total: 0,
   processed: 0,
@@ -101,6 +186,7 @@ const storageKeys = {
   endColumnName: "route_end_column_name",
   routeInputMode: "route_input_mode",
   mode: "geocode_mode",
+  mapRealtimeUpdate: "map_realtime_update",
 };
 
 const getProviderStorageKey = (currentProvider) =>
@@ -649,12 +735,14 @@ const startCustomGeocode = () => {
         const locationKey = coordPairKey(normalizedLat, normalizedLng);
 
         if (locationKey) {
-          geocodeCache.set(address, {
+          const geocodeResult = {
             success: true,
             lat: normalizedLat,
             lng: normalizedLng,
             key: locationKey,
-          });
+          };
+          geocodeCache.set(address, geocodeResult);
+          setPersistentCacheValue("geocode", address, geocodeResult);
 
           const indices = addressMap.get(address) || [];
           indices.forEach((rowIndex) => {
@@ -667,6 +755,10 @@ const startCustomGeocode = () => {
             lng: normalizedLng,
             address,
           });
+
+          if (mapRealtimeUpdate.value) {
+            refreshMarkers();
+          }
         } else {
           logs.value.push({
             address,
@@ -676,6 +768,12 @@ const startCustomGeocode = () => {
           });
         }
       } else {
+        setPersistentCacheValue("geocode", address, {
+          success: false,
+          type: payload.errorType || "network_error",
+          request: payload.request || "custom",
+          response: payload.response || "请求失败",
+        });
         logs.value.push({
           address,
           type: payload.errorType || "network_error",
@@ -688,8 +786,11 @@ const startCustomGeocode = () => {
     if (message.type === "complete") {
       geocodeState.running = false;
       geocodeState.current = "";
+      flushAllPersistentCaches();
       closeCustomSocket();
-      refreshMarkers();
+      if (mapRealtimeUpdate.value) {
+        refreshMarkers();
+      }
     }
   };
 
@@ -706,8 +807,12 @@ const startCustomGeocode = () => {
     if (geocodeState.running) {
       geocodeState.running = false;
       geocodeState.current = "";
-      refreshMarkers();
+      flushAllPersistentCaches();
+      if (mapRealtimeUpdate.value) {
+        refreshMarkers();
+      }
     }
+    flushAllPersistentCaches();
     closeCustomSocket();
   };
 };
@@ -789,6 +894,7 @@ const startCustomRoute = () => {
       const payload = message.payload || {};
       const routeIndex = Number(payload.index);
       const route = Number.isFinite(routeIndex) ? routes[routeIndex] : null;
+      const routeKey = route ? `${route.origin}=>${route.destination}` : "";
       const address = route ? `${route.origin} -> ${route.destination}` : "-";
       geocodeState.current = address;
 
@@ -841,6 +947,27 @@ const startCustomRoute = () => {
           const pairKey = routePairKey(originLat, originLng, destinationLat, destinationLng);
 
           if (pairKey) {
+            const routeResult = {
+              success: true,
+              failed: false,
+              distanceKm,
+              durationMin,
+              line: {
+                type: "LineString",
+                coordinates: [
+                  [originLng, originLat],
+                  [destinationLng, destinationLat],
+                ],
+              },
+              origin: { lat: originLat, lng: originLng },
+              destination: { lat: destinationLat, lng: destinationLng },
+              key: pairKey,
+            };
+            setPersistentCacheValue("route", pairKey, routeResult);
+            if (routeKey) {
+              routeCache.set(routeKey, routeResult);
+            }
+
             pushPointIfNeeded({
               lat: originLat,
               lng: originLng,
@@ -854,6 +981,7 @@ const startCustomRoute = () => {
               lat: destinationLat,
               lng: destinationLng,
               type: "destination",
+              failed: false,
               label: "终点",
               address: route.destination,
               displayMode: routeInputMode.value === "coordinate" ? "coordinate-only" : "full",
@@ -862,6 +990,7 @@ const startCustomRoute = () => {
             pushRouteLineIfNeeded({
               distanceKm,
               durationMin,
+              failed: false,
               geometry: {
                 type: "LineString",
                 coordinates: [
@@ -871,7 +1000,9 @@ const startCustomRoute = () => {
               },
             });
 
-            refreshMarkers();
+            if (mapRealtimeUpdate.value) {
+              refreshMarkers();
+            }
           } else {
             logs.value.push({
               address,
@@ -889,6 +1020,88 @@ const startCustomRoute = () => {
           });
         }
       } else {
+        const payloadOriginLat = normalizeCoordinate(payload.originLat);
+        const payloadOriginLng = normalizeCoordinate(payload.originLng);
+        const payloadDestinationLat = normalizeCoordinate(payload.destinationLat);
+        const payloadDestinationLng = normalizeCoordinate(payload.destinationLng);
+        const parsedOrigin = parseRouteCoordinate(route?.origin || "");
+        const parsedDestination = parseRouteCoordinate(route?.destination || "");
+        const originCoords =
+          Number.isFinite(payloadOriginLat) && Number.isFinite(payloadOriginLng)
+            ? { lat: payloadOriginLat, lng: payloadOriginLng }
+            : parsedOrigin.success
+              ? { lat: parsedOrigin.lat, lng: parsedOrigin.lng }
+              : null;
+        const destinationCoords =
+          Number.isFinite(payloadDestinationLat) && Number.isFinite(payloadDestinationLng)
+            ? { lat: payloadDestinationLat, lng: payloadDestinationLng }
+            : parsedDestination.success
+              ? { lat: parsedDestination.lat, lng: parsedDestination.lng }
+              : null;
+
+        let failedRouteResult = {
+          success: false,
+          type: payload.errorType || "network_error",
+          request: payload.request || "custom",
+          response: payload.response || "请求失败",
+        };
+
+        if (originCoords && destinationCoords) {
+          pushPointIfNeeded({
+            lat: originCoords.lat,
+            lng: originCoords.lng,
+            type: "origin",
+            label: "起点",
+            address: route?.origin,
+            displayMode: routeInputMode.value === "coordinate" ? "coordinate-only" : "full",
+          });
+
+          pushPointIfNeeded({
+            lat: destinationCoords.lat,
+            lng: destinationCoords.lng,
+            type: "destination",
+            failed: true,
+            label: "终点",
+            address: route?.destination,
+            displayMode: routeInputMode.value === "coordinate" ? "coordinate-only" : "full",
+          });
+
+          pushRouteLineIfNeeded({
+            distanceKm: "",
+            durationMin: "",
+            failed: true,
+            geometry: {
+              type: "LineString",
+              coordinates: [
+                [originCoords.lng, originCoords.lat],
+                [destinationCoords.lng, destinationCoords.lat],
+              ],
+            },
+          });
+
+          failedRouteResult = {
+            ...failedRouteResult,
+            failed: true,
+            distanceKm: "",
+            durationMin: "",
+            origin: { lat: originCoords.lat, lng: originCoords.lng },
+            destination: { lat: destinationCoords.lat, lng: destinationCoords.lng },
+            line: {
+              type: "LineString",
+              coordinates: [
+                [originCoords.lng, originCoords.lat],
+                [destinationCoords.lng, destinationCoords.lat],
+              ],
+            },
+          };
+
+          if (mapRealtimeUpdate.value) {
+            refreshMarkers();
+          }
+        }
+        if (routeKey) {
+          routeCache.set(routeKey, failedRouteResult);
+        }
         logs.value.push({
           address,
           type: payload.errorType || "network_error",
@@ -901,8 +1114,11 @@ const startCustomRoute = () => {
     if (message.type === "complete") {
       geocodeState.running = false;
       geocodeState.current = "";
+      flushAllPersistentCaches();
       closeCustomSocket();
-      refreshMarkers();
+      if (mapRealtimeUpdate.value) {
+        refreshMarkers();
+      }
     }
   };
 
@@ -919,8 +1135,12 @@ const startCustomRoute = () => {
     if (geocodeState.running) {
       geocodeState.running = false;
       geocodeState.current = "";
-      refreshMarkers();
+      flushAllPersistentCaches();
+      if (mapRealtimeUpdate.value) {
+        refreshMarkers();
+      }
     }
+    flushAllPersistentCaches();
     closeCustomSocket();
   };
 };
@@ -945,6 +1165,7 @@ const startGeocode = async () => {
     if (!result) {
       result = await geocodeAddress(address);
       geocodeCache.set(address, result);
+      setPersistentCacheValue("geocode", address, result);
     }
     geocodeState.processed += 1;
 
@@ -968,6 +1189,7 @@ const startGeocode = async () => {
 
   geocodeState.running = false;
   geocodeState.current = "";
+  flushAllPersistentCaches();
   refreshMarkers();
 };
 
@@ -1001,6 +1223,7 @@ const startReverseGeocode = async () => {
     if (!result) {
       result = await reverseGeocode(lat, lng);
       reverseCache.set(parsed.key, result);
+      setPersistentCacheValue("reverse", parsed.key, result);
     }
     geocodeState.processed += 1;
     if (result.success) {
@@ -1029,6 +1252,7 @@ const startReverseGeocode = async () => {
 
   geocodeState.running = false;
   geocodeState.current = "";
+  flushAllPersistentCaches();
   refreshMarkers();
 };
 
@@ -1117,6 +1341,12 @@ const startRoute = async () => {
         continue;
       }
       let result = routeCache.get(routeKey);
+      const pairKey = routePairKey(
+        parsedOrigin.lat,
+        parsedOrigin.lng,
+        parsedDestination.lat,
+        parsedDestination.lng
+      );
       if (!result) {
         result = await fetchRoute(
           parsedOrigin.lat,
@@ -1125,6 +1355,9 @@ const startRoute = async () => {
           parsedDestination.lng
         );
         routeCache.set(routeKey, result);
+        if (result.success) {
+          setPersistentCacheValue("route", pairKey, result);
+        }
       }
       geocodeState.processed += 1;
       if (result.success) {
@@ -1143,6 +1376,7 @@ const startRoute = async () => {
           lat: normalizeCoordinate(parsedDestination.lat),
           lng: normalizeCoordinate(parsedDestination.lng),
           type: "destination",
+          failed: false,
           label: "终点",
           displayMode: "coordinate-only",
         });
@@ -1150,9 +1384,43 @@ const startRoute = async () => {
         pushRouteLineIfNeeded({
           distanceKm: result.distanceKm,
           durationMin: result.durationMin,
+          failed: false,
           geometry: result.line,
         });
       } else {
+        pushPointIfNeeded({
+          lat: normalizeCoordinate(parsedOrigin.lat),
+          lng: normalizeCoordinate(parsedOrigin.lng),
+          type: "origin",
+          label: "起点",
+          displayMode: "coordinate-only",
+        });
+
+        pushPointIfNeeded({
+          lat: normalizeCoordinate(parsedDestination.lat),
+          lng: normalizeCoordinate(parsedDestination.lng),
+          type: "destination",
+          failed: true,
+          label: "终点",
+          displayMode: "coordinate-only",
+        });
+
+        pushRouteLineIfNeeded({
+          distanceKm: "",
+          durationMin: "",
+          failed: true,
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [normalizeCoordinate(parsedOrigin.lng), normalizeCoordinate(parsedOrigin.lat)],
+              [
+                normalizeCoordinate(parsedDestination.lng),
+                normalizeCoordinate(parsedDestination.lat),
+              ],
+            ],
+          },
+        });
+
         logs.value.push({
           address: routeKey,
           type: result.type,
@@ -1167,9 +1435,20 @@ const startRoute = async () => {
     if (!result) {
       const originResult = geocodeCache.get(origin) || (await geocodeAddress(origin));
       geocodeCache.set(origin, originResult);
+      setPersistentCacheValue("geocode", origin, originResult);
       const destinationResult =
         geocodeCache.get(destination) || (await geocodeAddress(destination));
       geocodeCache.set(destination, destinationResult);
+      setPersistentCacheValue("geocode", destination, destinationResult);
+      const pairKey =
+        originResult.success && destinationResult.success
+          ? routePairKey(
+              originResult.lat,
+              originResult.lng,
+              destinationResult.lat,
+              destinationResult.lng
+            )
+          : "";
       if (!originResult.success || !destinationResult.success) {
         const failure = !originResult.success ? originResult : destinationResult;
         result = {
@@ -1187,6 +1466,9 @@ const startRoute = async () => {
         );
       }
       routeCache.set(routeKey, result);
+      if (result.success) {
+        setPersistentCacheValue("route", pairKey, result);
+      }
     }
     geocodeState.processed += 1;
 
@@ -1207,6 +1489,7 @@ const startRoute = async () => {
         lat: normalizeCoordinate(result.destination.lat),
         lng: normalizeCoordinate(result.destination.lng),
         type: "destination",
+        failed: false,
         label: "终点",
         address: destination,
         displayMode: "full",
@@ -1215,9 +1498,51 @@ const startRoute = async () => {
       pushRouteLineIfNeeded({
         distanceKm: result.distanceKm,
         durationMin: result.durationMin,
+        failed: false,
         geometry: result.line,
       });
     } else {
+      if (routeInputMode.value === "address") {
+        const originResult = geocodeCache.get(origin);
+        const destinationResult = geocodeCache.get(destination);
+        if (originResult?.success && destinationResult?.success) {
+          pushPointIfNeeded({
+            lat: normalizeCoordinate(originResult.lat),
+            lng: normalizeCoordinate(originResult.lng),
+            type: "origin",
+            label: "起点",
+            address: origin,
+            displayMode: "full",
+          });
+
+          pushPointIfNeeded({
+            lat: normalizeCoordinate(destinationResult.lat),
+            lng: normalizeCoordinate(destinationResult.lng),
+            type: "destination",
+            failed: true,
+            label: "终点",
+            address: destination,
+            displayMode: "full",
+          });
+
+          pushRouteLineIfNeeded({
+            distanceKm: "",
+            durationMin: "",
+            failed: true,
+            geometry: {
+              type: "LineString",
+              coordinates: [
+                [normalizeCoordinate(originResult.lng), normalizeCoordinate(originResult.lat)],
+                [
+                  normalizeCoordinate(destinationResult.lng),
+                  normalizeCoordinate(destinationResult.lat),
+                ],
+              ],
+            },
+          });
+        }
+      }
+
       logs.value.push({
         address: routeKey,
         type: result.type,
@@ -1229,6 +1554,7 @@ const startRoute = async () => {
 
   geocodeState.running = false;
   geocodeState.current = "";
+  flushAllPersistentCaches();
   refreshMarkers();
 };
 
@@ -1251,6 +1577,12 @@ const handleStart = () => {
 };
 
 const geocodeAddress = async (address) => {
+  const requestKey = String(address ?? "").trim();
+  const persistentCached = getPersistentCacheValue("geocode", requestKey);
+  if (persistentCached) {
+    return persistentCached;
+  }
+
   const encoded = encodeURIComponent(address);
   if (provider.value === "custom") {
     const token = await fetchCustomToken();
@@ -1296,12 +1628,12 @@ const geocodeAddress = async (address) => {
       }
       const lat = normalizeCoordinate(location.lat);
       const lng = normalizeCoordinate(location.lng);
-      return {
+      return cacheAndReturn("geocode", requestKey, {
         success: true,
         lat,
         lng,
         key: coordPairKey(lat, lng),
-      };
+      });
     } catch (error) {
       return {
         success: false,
@@ -1343,7 +1675,12 @@ const geocodeAddress = async (address) => {
           response: JSON.stringify(body),
         };
       }
-      return { success: true, lat, lng, key: coordPairKey(lat, lng) };
+      return cacheAndReturn("geocode", requestKey, {
+        success: true,
+        lat,
+        lng,
+        key: coordPairKey(lat, lng),
+      });
     } catch (error) {
       return {
         success: false,
@@ -1385,7 +1722,12 @@ const geocodeAddress = async (address) => {
         response: JSON.stringify(body),
       };
     }
-    return { success: true, lat, lng, key: coordPairKey(lat, lng) };
+    return cacheAndReturn("geocode", requestKey, {
+      success: true,
+      lat,
+      lng,
+      key: coordPairKey(lat, lng),
+    });
   } catch (error) {
     return {
       success: false,
@@ -1424,6 +1766,13 @@ const fetchCustomToken = async () => {
 const reverseGeocode = async (lat, lng) => {
   const normalizedLat = normalizeCoordinate(lat);
   const normalizedLng = normalizeCoordinate(lng);
+  const requestKey = coordPairKey(normalizedLat, normalizedLng);
+  const persistentCached = requestKey
+    ? getPersistentCacheValue("reverse", requestKey)
+    : null;
+  if (persistentCached) {
+    return persistentCached;
+  }
 
   if (provider.value === "mapbox") {
     const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${normalizedLng},${normalizedLat}.json?access_token=${providerApiKey.value}`;
@@ -1448,13 +1797,13 @@ const reverseGeocode = async (lat, lng) => {
       }
       const feature = body.features[0];
       const { admin1, admin2, admin3 } = extractMapboxAdmin(feature);
-      return {
+      return cacheAndReturn("reverse", requestKey, {
         success: true,
         address: feature.place_name,
         admin1,
         admin2,
         admin3,
-      };
+      });
     } catch (error) {
       return {
         success: false,
@@ -1486,13 +1835,13 @@ const reverseGeocode = async (lat, lng) => {
       };
     }
     const address = body.items[0].address || {};
-    return {
+    return cacheAndReturn("reverse", requestKey, {
       success: true,
       address: body.items[0].title || "",
       admin1: address.state || address.province || "",
       admin2: address.city || address.county || "",
       admin3: address.district || address.subdistrict || address.county || "",
-    };
+    });
   } catch (error) {
     return {
       success: false,
@@ -1514,6 +1863,10 @@ const fetchRoute = async (originLat, originLng, destLat, destLng) => {
     normalizedDestLat,
     normalizedDestLng
   );
+  const persistentCached = pairKey ? getPersistentCacheValue("route", pairKey) : null;
+  if (persistentCached) {
+    return persistentCached;
+  }
 
   if (provider.value === "mapbox") {
     const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${normalizedOriginLng},${normalizedOriginLat};${normalizedDestLng},${normalizedDestLat}?geometries=geojson&overview=full&access_token=${providerApiKey.value}`;
@@ -1547,7 +1900,7 @@ const fetchRoute = async (originLat, originLng, destLat, destLng) => {
           }
         : null;
 
-      return {
+      return cacheAndReturn("route", pairKey, {
         success: true,
         distanceKm: (route.distance / 1000).toFixed(2),
         durationMin: Math.round(route.duration / 60),
@@ -1555,7 +1908,7 @@ const fetchRoute = async (originLat, originLng, destLat, destLng) => {
         origin: { lat: normalizedOriginLat, lng: normalizedOriginLng },
         destination: { lat: normalizedDestLat, lng: normalizedDestLng },
         key: pairKey,
-      };
+      });
     } catch (error) {
       return {
         success: false,
@@ -1590,7 +1943,7 @@ const fetchRoute = async (originLat, originLng, destLat, destLng) => {
     const summary = route.sections?.[0]?.summary;
     const polyline = route.sections?.[0]?.polyline;
     const geometry = polyline ? decodeHerePolyline(polyline) : null;
-    return {
+    return cacheAndReturn("route", pairKey, {
       success: true,
       distanceKm: summary ? (summary.length / 1000).toFixed(2) : "",
       durationMin: summary ? Math.round(summary.duration / 60) : "",
@@ -1598,7 +1951,7 @@ const fetchRoute = async (originLat, originLng, destLat, destLng) => {
       origin: { lat: normalizedOriginLat, lng: normalizedOriginLng },
       destination: { lat: normalizedDestLat, lng: normalizedDestLng },
       key: pairKey,
-    };
+    });
   } catch (error) {
     return {
       success: false,
@@ -1758,6 +2111,20 @@ const initMap = () => {
   });
 };
 
+const destroyMap = () => {
+  if (mapInstance) {
+    mapInstance.remove();
+    mapInstance = null;
+  }
+  mapLoaded.value = false;
+  mapMarkers = [];
+  routeHoverHandlers = null;
+  if (routePopup) {
+    routePopup.remove();
+    routePopup = null;
+  }
+};
+
 const refreshMarkers = () => {
   if (!mapInstance) return;
   mapMarkers.forEach((marker) => marker.remove());
@@ -1774,11 +2141,13 @@ const refreshMarkers = () => {
             point.type === "origin"
               ? "#16a34a"
               : point.type === "destination"
-                ? "#dc2626"
+                ? point.failed
+                  ? "#dc2626"
+                  : "#7c3aed"
                 : "#2563eb",
         });
     marker.setLngLat([point.lng, point.lat]).addTo(mapInstance);
-    const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 12 })
+    const popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: false, offset: 12 })
       .setLngLat([point.lng, point.lat])
       .setHTML(buildPointPopupContent(point));
     const markerDomElement = marker.getElement();
@@ -1808,6 +2177,7 @@ const buildRouteFeatureCollection = () => ({
     properties: {
       distanceKm: line.distanceKm ?? "",
       durationMin: line.durationMin ?? "",
+      failed: Boolean(line.failed),
     },
     geometry: line.geometry,
   })),
@@ -1837,7 +2207,7 @@ const updateRouteLayer = () => {
         "line-cap": "round",
       },
       paint: {
-        "line-color": "#0ea5e9",
+        "line-color": ["case", ["==", ["get", "failed"], true], "#dc2626", "#0ea5e9"],
         "line-width": 1,
         "line-dasharray": [2, 2],
       },
@@ -1848,7 +2218,7 @@ const updateRouteLayer = () => {
 
 const attachRouteHover = (layerId) => {
   if (!mapInstance || routeHoverHandlers) return;
-  routePopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 12 });
+  routePopup = new mapboxgl.Popup({ closeButton: true, closeOnClick: false, offset: 12 });
   const buildRouteContent = (feature) => {
     const distanceKm = feature?.properties?.distanceKm;
     const durationMin = feature?.properties?.durationMin;
@@ -1883,9 +2253,15 @@ const attachRouteHover = (layerId) => {
 };
 
 const buildPointMarkerElement = (point) => {
-  if (mode.value === "route" && point.type === "origin") {
+  if (mode.value === "route" && (point.type === "origin" || point.type === "destination")) {
     const el = document.createElement("div");
-    el.className = "route-origin-circle-marker";
+    if (point.type === "origin") {
+      el.className = "route-origin-circle-marker";
+    } else if (point.failed) {
+      el.className = "route-destination-circle-marker-failed";
+    } else {
+      el.className = "route-destination-circle-marker";
+    }
     return el;
   }
   return null;
@@ -2074,6 +2450,10 @@ onMounted(() => {
   if (savedRouteInputMode === "address" || savedRouteInputMode === "coordinate") {
     routeInputMode.value = savedRouteInputMode;
   }
+  const savedMapRealtimeUpdate = localStorage.getItem(storageKeys.mapRealtimeUpdate);
+  if (savedMapRealtimeUpdate === "0") {
+    mapRealtimeUpdate.value = false;
+  }
   const savedKey = localStorage.getItem(storageKeys.mapboxMap);
   if (savedKey) {
     mapApiKey.value = savedKey;
@@ -2246,13 +2626,31 @@ watch(routeInputMode, (value) => {
   }
 });
 
+watch(mapRealtimeUpdate, (value, oldValue) => {
+  localStorage.setItem(storageKeys.mapRealtimeUpdate, value ? "1" : "0");
+  if (value && oldValue === false) {
+    refreshMarkers();
+  }
+});
+
 watch(mode, (value) => {
   localStorage.setItem(storageKeys.mode, value);
   if (value === "reverse" && provider.value === "custom") {
     provider.value = "mapbox";
   }
+
+  if (value === "visualize") {
+    destroyMap();
+  }
+
   resetFileData();
   resetResults();
+
+  if (value !== "visualize" && mapApiKey.value) {
+    nextTick(() => {
+      initMap();
+    });
+  }
 });
 
   return {
@@ -2291,6 +2689,7 @@ watch(mode, (value) => {
     isDragging,
     dropzoneFlash,
     mockAnimating,
+    mapRealtimeUpdate,
     points,
     routeLines,
     mode,

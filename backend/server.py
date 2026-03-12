@@ -1,9 +1,85 @@
 import asyncio
 import json
+import hashlib
+from pathlib import Path
 
 import aiohttp
 import websockets
 
+
+CACHE_DIR = Path(__file__).resolve().parent / "cache"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+CACHE_FLUSH_BATCH = 100
+
+
+class PersistentCache:
+    def __init__(self, name):
+        self.path = CACHE_DIR / f"{name}.json"
+        self.store = self._load()
+        self.pending = 0
+
+    def _load(self):
+        if not self.path.exists():
+            return {}
+        try:
+            with self.path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def get(self, key):
+        return self.store.get(key)
+
+    def set(self, key, value):
+        self.store[key] = value
+        self.pending += 1
+        if self.pending >= CACHE_FLUSH_BATCH:
+            self.flush()
+
+    def flush(self):
+        if self.pending <= 0:
+            return
+        with self.path.open("w", encoding="utf-8") as f:
+            json.dump(self.store, f, ensure_ascii=False)
+        self.pending = 0
+
+
+GEOCODE_PERSISTENT_CACHES = {}
+ROUTE_PERSISTENT_CACHES = {}
+
+
+def get_interface_name(config):
+    geocode_url = (config.get("geocodeUrl") or "").lower()
+    route_url = (config.get("routeUrl") or "").lower()
+    combined = f"{geocode_url} {route_url}"
+    if "mapbox" in combined:
+        return "mapbox"
+    if "here" in combined:
+        return "here"
+    if geocode_url or route_url:
+        return "custom"
+    return "unknown"
+
+
+def get_geocode_persistent_cache(config):
+    interface = get_interface_name(config)
+    geocode_url = config.get("geocodeUrl") or "default"
+    key = f"{interface}_{geocode_url}"
+    if key not in GEOCODE_PERSISTENT_CACHES:
+        digest = hashlib.md5(geocode_url.encode("utf-8")).hexdigest()[:12]
+        GEOCODE_PERSISTENT_CACHES[key] = PersistentCache(f"geocode_{interface}_{digest}")
+    return GEOCODE_PERSISTENT_CACHES[key]
+
+
+def get_route_persistent_cache(config):
+    interface = get_interface_name(config)
+    route_url = config.get("routeUrl") or "default"
+    key = f"{interface}_{route_url}"
+    if key not in ROUTE_PERSISTENT_CACHES:
+        digest = hashlib.md5(route_url.encode("utf-8")).hexdigest()[:12]
+        ROUTE_PERSISTENT_CACHES[key] = PersistentCache(f"route_{interface}_{digest}")
+    return ROUTE_PERSISTENT_CACHES[key]
 
 def round_coord(value):
     if value is None:
@@ -35,10 +111,14 @@ async def fetch_token(session, config):
         return data.get("result", "")
 
 
-async def geocode_address(session, token, config, address, geocode_cache):
+async def geocode_address(session, token, config, address, geocode_cache, persistent_cache):
     cache_key = str(address or "").strip()
     if cache_key in geocode_cache:
         return geocode_cache[cache_key]
+    cached = persistent_cache.get(cache_key)
+    if cached is not None:
+        geocode_cache[cache_key] = cached
+        return cached
 
     geocode_url = config.get("geocodeUrl")
     if not geocode_url:
@@ -49,6 +129,7 @@ async def geocode_address(session, token, config, address, geocode_cache):
             "response": "缺少地理编码接口地址",
         }
         geocode_cache[cache_key] = result
+        persistent_cache.set(cache_key, result)
         return result
 
     headers = {"Content-Type": "application/json"}
@@ -71,6 +152,7 @@ async def geocode_address(session, token, config, address, geocode_cache):
                 "response": json.dumps(data, ensure_ascii=False),
             }
             geocode_cache[cache_key] = result
+            persistent_cache.set(cache_key, result)
             return result
 
         location = data.get("result", {}).get("geometry", {}).get("location", {})
@@ -84,6 +166,7 @@ async def geocode_address(session, token, config, address, geocode_cache):
                 "response": json.dumps(data, ensure_ascii=False),
             }
             geocode_cache[cache_key] = result
+            persistent_cache.set(cache_key, result)
             return result
 
         result = {
@@ -92,13 +175,19 @@ async def geocode_address(session, token, config, address, geocode_cache):
             "lng": round_coord(lng),
         }
         geocode_cache[cache_key] = result
+        persistent_cache.set(cache_key, result)
         return result
 
 
-async def fetch_route(session, token, config, origin, destination, route_cache):
+async def fetch_route(session, token, config, origin, destination, route_cache, persistent_cache):
     cache_key = (origin, destination)
     if cache_key in route_cache:
         return route_cache[cache_key]
+    persistent_cache_key = f"{origin}|{destination}"
+    cached = persistent_cache.get(persistent_cache_key)
+    if cached is not None:
+        route_cache[cache_key] = cached
+        return cached
 
     route_url = config.get("routeUrl")
     if not route_url:
@@ -153,6 +242,7 @@ async def fetch_route(session, token, config, origin, destination, route_cache):
             "durationMin": round(duration_value / 60),
         }
         route_cache[cache_key] = result
+        persistent_cache.set(persistent_cache_key, result)
         return result
 
 
@@ -215,6 +305,8 @@ async def handle_connection(websocket):
         async with aiohttp.ClientSession() as session:
             geocode_cache = {}
             route_cache = {}
+            geocode_persistent_cache = get_geocode_persistent_cache(config)
+            route_persistent_cache = get_route_persistent_cache(config)
 
             token = await fetch_token(session, config)
             if not token:
@@ -250,10 +342,20 @@ async def handle_connection(websocket):
 
                     if route_input_mode == "address":
                         origin_result = await geocode_address(
-                            session, token, config, origin_value, geocode_cache
+                            session,
+                            token,
+                            config,
+                            origin_value,
+                            geocode_cache,
+                            geocode_persistent_cache,
                         )
                         destination_result = await geocode_address(
-                            session, token, config, destination_value, geocode_cache
+                            session,
+                            token,
+                            config,
+                            destination_value,
+                            geocode_cache,
+                            geocode_persistent_cache,
                         )
 
                         if origin_result.get("success"):
@@ -291,6 +393,7 @@ async def handle_connection(websocket):
                                 origin_value,
                                 destination_value,
                                 route_cache,
+                                route_persistent_cache,
                             )
                     else:
                         origin_coords = parse_coordinate(origin_value)
@@ -315,6 +418,7 @@ async def handle_connection(websocket):
                                 origin_value,
                                 destination_value,
                                 route_cache,
+                                route_persistent_cache,
                             )
 
                     await websocket.send(
@@ -346,7 +450,12 @@ async def handle_connection(websocket):
             else:
                 for index, address in enumerate(addresses, start=1):
                     result = await geocode_address(
-                        session, token, config, address, geocode_cache
+                        session,
+                        token,
+                        config,
+                        address,
+                        geocode_cache,
+                        geocode_persistent_cache,
                     )
                     await websocket.send(
                         json.dumps(
@@ -366,6 +475,9 @@ async def handle_connection(websocket):
                             ensure_ascii=False,
                         )
                     )
+
+            geocode_persistent_cache.flush()
+            route_persistent_cache.flush()
 
         await websocket.send(json.dumps({"type": "complete"}, ensure_ascii=False))
 
