@@ -2,7 +2,7 @@
   <header class="app-header">
     <div>
       <h1>{{ headerTitle }}</h1>
-      <p class="sub-title">支持地址编码、经纬度解码、导航距离计算三种批量处理方式。</p>
+      <p class="sub-title">支持地图可视化、地址编码、经纬度解码、导航距离计算四种处理方式。</p>
     </div>
     <div class="header-controls">
       <div class="mode-toggle" role="tablist" aria-label="功能切换">

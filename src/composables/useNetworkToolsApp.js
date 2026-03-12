@@ -66,6 +66,7 @@ const routeLines = ref([]);
 const mode = ref("geocode");
 
 const modeOptions = [
+  { value: "visualize", label: "地图可视化" },
   { value: "geocode", label: "地址编码" },
   { value: "reverse", label: "经纬度解码" },
   { value: "route", label: "导航距离计算" },
@@ -261,6 +262,9 @@ const canDownload = computed(() => {
 const hasData = computed(() => rows.value.length > 0);
 
 const headerTitle = computed(() => {
+  if (mode.value === "visualize") {
+    return "地图数据可视化";
+  }
   if (mode.value === "reverse") {
     return "Excel 经纬度批量解析地址";
   }
