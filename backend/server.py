@@ -10,6 +10,7 @@ import websockets
 CACHE_DIR = Path(__file__).resolve().parent / "cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_FLUSH_BATCH = 100
+WS_MAX_SIZE = 10 * 1024 * 1024
 
 
 class PersistentCache:
@@ -483,7 +484,12 @@ async def handle_connection(websocket):
 
 
 async def main():
-    async with websockets.serve(handle_connection, "0.0.0.0", 8765):
+    async with websockets.serve(
+        handle_connection,
+        "0.0.0.0",
+        8765,
+        max_size=WS_MAX_SIZE,
+    ):
         await asyncio.Future()
 
 
