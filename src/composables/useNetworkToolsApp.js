@@ -2147,7 +2147,7 @@ const refreshMarkers = () => {
                 : "#2563eb",
         });
     marker.setLngLat([point.lng, point.lat]).addTo(mapInstance);
-    const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 12 })
+    const popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: false, offset: 12 })
       .setLngLat([point.lng, point.lat])
       .setHTML(buildPointPopupContent(point));
     const markerDomElement = marker.getElement();
@@ -2218,7 +2218,7 @@ const updateRouteLayer = () => {
 
 const attachRouteHover = (layerId) => {
   if (!mapInstance || routeHoverHandlers) return;
-  routePopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 12 });
+  routePopup = new mapboxgl.Popup({ closeButton: true, closeOnClick: false, offset: 12 });
   const buildRouteContent = (feature) => {
     const distanceKm = feature?.properties?.distanceKm;
     const durationMin = feature?.properties?.durationMin;
