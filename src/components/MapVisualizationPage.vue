@@ -70,11 +70,17 @@
             ×
           </button>
         </div>
-        <button class="secondary add-dataset" type="button" @click="addDataset">+ 添加数据集</button>
+        <button class="add-dataset" type="button" @click="addDataset">+ 添加数据集</button>
       </div>
 
       <div class="dataset-toolbar">
-        <button class="secondary action-button" type="button" @click="triggerFilePicker" :disabled="isProcessing">
+        <button
+          class="secondary action-button"
+          type="button"
+          :disabled="isProcessing"
+          title="可自动识别geojson和csv格式数据。csv格式必须有一行表头，且表头至少包含经度与纬度字段（如：经度/纬度、lon/lng/longitude/long 与 lat/latitude，不区分大小写）"
+          @click="triggerFilePicker"
+        >
           上传文件
         </button>
         <input
@@ -89,11 +95,23 @@
               </div>
 
       <div v-if="showPaste" class="paste-box">
-        <textarea
-          v-model="pasteInput"
-          rows="4"
-          placeholder="支持粘贴 geojson / csv / wkt (POINT, LINESTRING, POLYGON, MULTIPOLYGON)"
-        />
+        <div class="paste-input-wrap">
+          <textarea
+            v-model="pasteInput"
+            rows="4"
+            placeholder="支持粘贴 geojson / csv / wkt (POINT, LINESTRING, POLYGON, MULTIPOLYGON)"
+          />
+          <button
+            v-if="pasteInput"
+            class="paste-close"
+            type="button"
+            aria-label="清空粘贴内容"
+            title="清空"
+            @click="clearPasteInput"
+          >
+            ×
+          </button>
+        </div>
         <button class="primary" type="button" @click="handlePasteImport" :disabled="isProcessing">解析并导入</button>
       </div>
 
@@ -169,9 +187,9 @@
                     class="cell-editor"
                     :value="editingValue"
                     @input="editingValue = $event.target.value"
-                    @blur="saveEditCell(row, col)"
+                    @blur="handleEditorBlur(row, col)"
                     @keydown.enter.prevent="saveEditCell(row, col)"
-                    @keydown.esc.prevent="cancelEditCell"
+                    @keydown.esc.prevent="handleEditorEsc"
                   />
                 </template>
                 <button v-else class="cell-value-btn" type="button" @click="startEditCell(row, col)">
@@ -256,6 +274,7 @@ const currentPage = ref(1);
 const pageSize = 20;
 const editingCell = ref({ featureKey: "", column: "" });
 const editingValue = ref("");
+const skipBlurSave = ref(false);
 
 const rowElementMap = new Map();
 let featureCounter = 1;
@@ -399,6 +418,20 @@ const startEditCell = (row, column) => {
 const cancelEditCell = () => {
   editingCell.value = { featureKey: "", column: "" };
   editingValue.value = "";
+};
+
+const handleEditorEsc = (event) => {
+  skipBlurSave.value = true;
+  cancelEditCell();
+  event.target?.blur();
+};
+
+const handleEditorBlur = (row, column) => {
+  if (skipBlurSave.value) {
+    skipBlurSave.value = false;
+    return;
+  }
+  saveEditCell(row, column);
 };
 
 const saveEditCell = (row, column) => {
@@ -566,11 +599,13 @@ const ensureMap = () => {
   map = new mapboxgl.Map({
     container: mapContainer.value,
     style: "mapbox://styles/mapbox/streets-v12",
+    projection: "mercator",
     center: [116.397, 39.908],
     zoom: 4,
   });
 
   map.on("load", () => {
+    map.setProjection("mercator");
     mapReady.value = true;
     map.addSource("viz-source", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
 
@@ -788,6 +823,8 @@ const parseCoordinatePairsString = (value) => {
 const detectGeometryFromRow = (row) => {
   const keys = Object.keys(row);
   const lowerKeyMap = Object.fromEntries(keys.map((key) => [key.toLowerCase(), key]));
+  const normalizeHeaderKey = (key) => key.toLowerCase().replace(/[\s_-]/g, "");
+  const normalizedKeyMap = Object.fromEntries(keys.map((key) => [normalizeHeaderKey(key), key]));
 
   const wktKey = Object.keys(lowerKeyMap).find((key) =>
     ["wkt", "geometry", "geom", "the_geom"].some((field) => key.includes(field))
@@ -803,11 +840,13 @@ const detectGeometryFromRow = (row) => {
     }
   }
 
-  const lngKey = Object.keys(lowerKeyMap).find((key) => ["lng", "lon", "long", "longitude", "x"].includes(key));
-  const latKey = Object.keys(lowerKeyMap).find((key) => ["lat", "latitude", "y"].includes(key));
+  const lngAliases = ["lng", "lon", "long", "longitude", "x", "经度", "经"];
+  const latAliases = ["lat", "latitude", "y", "纬度", "纬"];
+  const lngKey = Object.keys(normalizedKeyMap).find((key) => lngAliases.includes(key));
+  const latKey = Object.keys(normalizedKeyMap).find((key) => latAliases.includes(key));
   if (lngKey && latKey) {
-    const lng = Number(row[lowerKeyMap[lngKey]]);
-    const lat = Number(row[lowerKeyMap[latKey]]);
+    const lng = Number(row[normalizedKeyMap[lngKey]]);
+    const lat = Number(row[normalizedKeyMap[latKey]]);
     if (Number.isFinite(lng) && Number.isFinite(lat)) {
       return { type: "Point", coordinates: [lng, lat] };
     }
@@ -983,6 +1022,10 @@ const handleFileUpload = async (event) => {
 
 const handlePasteImport = async () => {
   await importFeaturesWithMask(pasteInput.value);
+  pasteInput.value = "";
+};
+
+const clearPasteInput = () => {
   pasteInput.value = "";
 };
 

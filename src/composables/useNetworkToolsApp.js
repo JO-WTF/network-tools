@@ -63,7 +63,7 @@ const geocodeState = reactive({
 });
 const points = ref([]);
 const routeLines = ref([]);
-const mode = ref("geocode");
+const mode = ref("visualize");
 
 const modeOptions = [
   { value: "visualize", label: "地图可视化" },
@@ -1742,11 +1742,13 @@ const initMap = () => {
   mapInstance = new mapboxgl.Map({
     container: mapContainer.value,
     style: "mapbox://styles/mapbox/streets-v12",
+    projection: "mercator",
     center: [116.397389, 39.908722],
     zoom: 3,
   });
   mapInstance.addControl(new mapboxgl.NavigationControl(), "top-right");
   mapInstance.on("load", () => {
+    mapInstance.setProjection("mercator");
     mapLoaded.value = true;
     refreshMarkers();
   });
@@ -1989,10 +1991,7 @@ const handleConfigFileChange = async (event) => {
 };
 
 onMounted(() => {
-  const savedMode = localStorage.getItem(storageKeys.mode);
-  if (savedMode && modeOptions.some((item) => item.value === savedMode)) {
-    mode.value = savedMode;
-  }
+  mode.value = "visualize";
   const savedProvider = localStorage.getItem(storageKeys.provider);
   if (savedProvider === "mapbox" || savedProvider === "here" || savedProvider === "custom") {
     provider.value = savedProvider;
