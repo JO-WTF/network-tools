@@ -892,7 +892,10 @@ button:not(:disabled):hover {
 }
 
 .cell-editor {
+  display: block;
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   border: 1px solid #cbd5f5;
   border-radius: 6px;
   padding: 4px 6px;

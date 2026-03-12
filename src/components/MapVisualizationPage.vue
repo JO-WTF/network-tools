@@ -187,9 +187,9 @@
                     class="cell-editor"
                     :value="editingValue"
                     @input="editingValue = $event.target.value"
-                    @blur="saveEditCell(row, col)"
+                    @blur="handleEditorBlur(row, col)"
                     @keydown.enter.prevent="saveEditCell(row, col)"
-                    @keydown.esc.prevent="cancelEditCell"
+                    @keydown.esc.prevent="handleEditorEsc"
                   />
                 </template>
                 <button v-else class="cell-value-btn" type="button" @click="startEditCell(row, col)">
@@ -274,6 +274,7 @@ const currentPage = ref(1);
 const pageSize = 20;
 const editingCell = ref({ featureKey: "", column: "" });
 const editingValue = ref("");
+const skipBlurSave = ref(false);
 
 const rowElementMap = new Map();
 let featureCounter = 1;
@@ -417,6 +418,20 @@ const startEditCell = (row, column) => {
 const cancelEditCell = () => {
   editingCell.value = { featureKey: "", column: "" };
   editingValue.value = "";
+};
+
+const handleEditorEsc = (event) => {
+  skipBlurSave.value = true;
+  cancelEditCell();
+  event.target?.blur();
+};
+
+const handleEditorBlur = (row, column) => {
+  if (skipBlurSave.value) {
+    skipBlurSave.value = false;
+    return;
+  }
+  saveEditCell(row, column);
 };
 
 const saveEditCell = (row, column) => {
