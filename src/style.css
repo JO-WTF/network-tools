@@ -601,11 +601,31 @@ button:not(:disabled):hover {
   gap: 10px;
 }
 
-.paste-box textarea {
+.paste-input-wrap {
+  position: relative;
   flex: 1;
+}
+
+.paste-box textarea {
+  width: 100%;
   border: 1px solid #cbd5f5;
   border-radius: 10px;
-  padding: 8px;
+  padding: 8px 28px 8px 8px;
+}
+
+.paste-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  border: 1px solid #cbd5f5;
+  border-radius: 999px;
+  background: #fff;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
 }
 
 .dataset-tabs {
@@ -672,6 +692,17 @@ button:not(:disabled):hover {
 
 .add-dataset {
   margin-left: 2px;
+  border: 1px dashed #7c3aed;
+  background: #f5f3ff;
+  color: #6d28d9;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.add-dataset:hover {
+  background: #ede9fe;
+  border-color: #6d28d9;
 }
 
 .action-button {

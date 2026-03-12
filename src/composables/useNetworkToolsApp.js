@@ -63,7 +63,7 @@ const geocodeState = reactive({
 });
 const points = ref([]);
 const routeLines = ref([]);
-const mode = ref("geocode");
+const mode = ref("visualize");
 
 const modeOptions = [
   { value: "visualize", label: "地图可视化" },
@@ -1989,10 +1989,7 @@ const handleConfigFileChange = async (event) => {
 };
 
 onMounted(() => {
-  const savedMode = localStorage.getItem(storageKeys.mode);
-  if (savedMode && modeOptions.some((item) => item.value === savedMode)) {
-    mode.value = savedMode;
-  }
+  mode.value = "visualize";
   const savedProvider = localStorage.getItem(storageKeys.provider);
   if (savedProvider === "mapbox" || savedProvider === "here" || savedProvider === "custom") {
     provider.value = savedProvider;

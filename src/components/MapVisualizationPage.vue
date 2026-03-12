@@ -70,11 +70,17 @@
             ×
           </button>
         </div>
-        <button class="secondary add-dataset" type="button" @click="addDataset">+ 添加数据集</button>
+        <button class="add-dataset" type="button" @click="addDataset">+ 添加数据集</button>
       </div>
 
       <div class="dataset-toolbar">
-        <button class="secondary action-button" type="button" @click="triggerFilePicker" :disabled="isProcessing">
+        <button
+          class="secondary action-button"
+          type="button"
+          :disabled="isProcessing"
+          title="可自动识别geojson和csv格式数据。csv格式必须有一行表头，且表头必须至少有 lon(lng, longitude) 和 lat(latitude) 列"
+          @click="triggerFilePicker"
+        >
           上传文件
         </button>
         <input
@@ -89,11 +95,23 @@
               </div>
 
       <div v-if="showPaste" class="paste-box">
-        <textarea
-          v-model="pasteInput"
-          rows="4"
-          placeholder="支持粘贴 geojson / csv / wkt (POINT, LINESTRING, POLYGON, MULTIPOLYGON)"
-        />
+        <div class="paste-input-wrap">
+          <textarea
+            v-model="pasteInput"
+            rows="4"
+            placeholder="支持粘贴 geojson / csv / wkt (POINT, LINESTRING, POLYGON, MULTIPOLYGON)"
+          />
+          <button
+            v-if="pasteInput"
+            class="paste-close"
+            type="button"
+            aria-label="清空粘贴内容"
+            title="清空"
+            @click="clearPasteInput"
+          >
+            ×
+          </button>
+        </div>
         <button class="primary" type="button" @click="handlePasteImport" :disabled="isProcessing">解析并导入</button>
       </div>
 
@@ -983,6 +1001,10 @@ const handleFileUpload = async (event) => {
 
 const handlePasteImport = async () => {
   await importFeaturesWithMask(pasteInput.value);
+  pasteInput.value = "";
+};
+
+const clearPasteInput = () => {
   pasteInput.value = "";
 };
 
