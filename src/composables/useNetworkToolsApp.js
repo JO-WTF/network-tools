@@ -76,6 +76,8 @@ let mapInstance = null;
 let mapMarkers = [];
 let routePopup = null;
 let routeHoverHandlers = null;
+const routeSourceId = "route-line";
+const routeLayerId = "route-line";
 
 const storageKeys = {
   provider: "geocode_provider",
@@ -544,10 +546,10 @@ const parseRouteCoordinate = (value) => {
   if (parts.length < 2) {
     return { success: false, key: raw, message: "坐标格式不完整" };
   }
-  const lat = normalizeCoordinate(parts[0]);
-  const lng = normalizeCoordinate(parts[1]);
+  const lng = normalizeCoordinate(parts[0]);
+  const lat = normalizeCoordinate(parts[1]);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return { success: false, key: raw, message: "纬度或经度不是有效数字" };
+    return { success: false, key: raw, message: "经度或纬度不是有效数字" };
   }
   return {
     success: true,
@@ -1739,6 +1741,8 @@ const initMap = () => {
     mapInstance.remove();
     mapInstance = null;
   }
+  routeHoverHandlers = null;
+  routePopup = null;
   mapInstance = new mapboxgl.Map({
     container: mapContainer.value,
     style: "mapbox://styles/mapbox/streets-v12",
@@ -1762,19 +1766,26 @@ const refreshMarkers = () => {
   if (!points.value.length) return;
   const bounds = new mapboxgl.LngLatBounds();
   points.value.forEach((point) => {
-    const color =
-      point.type === "origin" ? "#16a34a" : point.type === "destination" ? "#dc2626" : "#2563eb";
-    const marker = new mapboxgl.Marker({ color })
-      .setLngLat([point.lng, point.lat])
-      .addTo(mapInstance);
+    const markerElement = buildPointMarkerElement(point);
+    const marker = markerElement
+      ? new mapboxgl.Marker({ element: markerElement })
+      : new mapboxgl.Marker({
+          color:
+            point.type === "origin"
+              ? "#16a34a"
+              : point.type === "destination"
+                ? "#dc2626"
+                : "#2563eb",
+        });
+    marker.setLngLat([point.lng, point.lat]).addTo(mapInstance);
     const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 12 })
       .setLngLat([point.lng, point.lat])
       .setHTML(buildPointPopupContent(point));
-    const markerElement = marker.getElement();
-    markerElement.addEventListener("mouseenter", () => {
+    const markerDomElement = marker.getElement();
+    markerDomElement.addEventListener("mouseenter", () => {
       popup.addTo(mapInstance);
     });
-    markerElement.addEventListener("mouseleave", () => {
+    markerDomElement.addEventListener("mouseleave", () => {
       popup.remove();
     });
     mapMarkers.push(marker);
@@ -1790,58 +1801,53 @@ const refreshMarkers = () => {
   }
 };
 
+const buildRouteFeatureCollection = () => ({
+  type: "FeatureCollection",
+  features: routeLines.value.map((line) => ({
+    type: "Feature",
+    properties: {
+      distanceKm: line.distanceKm ?? "",
+      durationMin: line.durationMin ?? "",
+    },
+    geometry: line.geometry,
+  })),
+});
+
 const updateRouteLayer = () => {
   if (!mapInstance) return;
-  const sourceId = "route-line";
-  if (routeHoverHandlers) {
-    mapInstance.off("mouseenter", sourceId, routeHoverHandlers.enter);
-    mapInstance.off("mouseleave", sourceId, routeHoverHandlers.leave);
-    mapInstance.off("mousemove", sourceId, routeHoverHandlers.move);
-    routeHoverHandlers = null;
-  }
-  if (routePopup) {
-    routePopup.remove();
-  }
-  if (mapInstance.getLayer(sourceId)) {
-    mapInstance.removeLayer(sourceId);
-  }
-  if (mapInstance.getSource(sourceId)) {
-    mapInstance.removeSource(sourceId);
-  }
-  if (routeLines.value.length) {
-    mapInstance.addSource(sourceId, {
+  const source = mapInstance.getSource(routeSourceId);
+  const data = buildRouteFeatureCollection();
+
+  if (!source) {
+    mapInstance.addSource(routeSourceId, {
       type: "geojson",
-      data: {
-        type: "FeatureCollection",
-        features: routeLines.value.map((line) => ({
-          type: "Feature",
-          properties: {
-            distanceKm: line.distanceKm ?? "",
-            durationMin: line.durationMin ?? "",
-          },
-          geometry: line.geometry,
-        })),
-      },
+      data,
     });
+  } else {
+    source.setData(data);
+  }
+
+  if (!mapInstance.getLayer(routeLayerId)) {
     mapInstance.addLayer({
-      id: sourceId,
+      id: routeLayerId,
       type: "line",
-      source: sourceId,
+      source: routeSourceId,
       layout: {
         "line-join": "round",
         "line-cap": "round",
       },
       paint: {
         "line-color": "#0ea5e9",
-        "line-width": 4,
+        "line-width": 1,
+        "line-dasharray": [2, 2],
       },
     });
-    attachRouteHover(sourceId);
+    attachRouteHover(routeLayerId);
   }
 };
 
-const attachRouteHover = (sourceId) => {
-  if (!mapInstance) return;
+const attachRouteHover = (layerId) => {
+  if (!mapInstance || routeHoverHandlers) return;
   routePopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 12 });
   const buildRouteContent = (feature) => {
     const distanceKm = feature?.properties?.distanceKm;
@@ -1871,9 +1877,18 @@ const attachRouteHover = (sourceId) => {
     routePopup.remove();
   };
   routeHoverHandlers = { enter, leave, move };
-  mapInstance.on("mouseenter", sourceId, enter);
-  mapInstance.on("mousemove", sourceId, move);
-  mapInstance.on("mouseleave", sourceId, leave);
+  mapInstance.on("mouseenter", layerId, enter);
+  mapInstance.on("mousemove", layerId, move);
+  mapInstance.on("mouseleave", layerId, leave);
+};
+
+const buildPointMarkerElement = (point) => {
+  if (mode.value === "route" && point.type === "origin") {
+    const el = document.createElement("div");
+    el.className = "route-origin-circle-marker";
+    return el;
+  }
+  return null;
 };
 
 const formatCoordinate = (value) => {
