@@ -717,6 +717,14 @@ button:not(:disabled):hover {
   color: #475569;
 }
 
+
+.filter-row .small {
+  border-style: dashed;
+  border-color: #94a3b8;
+  background: #ffffff;
+  color: #334155;
+}
+
 .filter-row .small.active {
   background: #2563eb;
   border-color: #2563eb;
