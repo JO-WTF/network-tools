@@ -599,11 +599,13 @@ const ensureMap = () => {
   map = new mapboxgl.Map({
     container: mapContainer.value,
     style: "mapbox://styles/mapbox/streets-v12",
+    projection: "mercator",
     center: [116.397, 39.908],
     zoom: 4,
   });
 
   map.on("load", () => {
+    map.setProjection("mercator");
     mapReady.value = true;
     map.addSource("viz-source", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
 

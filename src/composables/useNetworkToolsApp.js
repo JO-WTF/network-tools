@@ -1742,11 +1742,13 @@ const initMap = () => {
   mapInstance = new mapboxgl.Map({
     container: mapContainer.value,
     style: "mapbox://styles/mapbox/streets-v12",
+    projection: "mercator",
     center: [116.397389, 39.908722],
     zoom: 3,
   });
   mapInstance.addControl(new mapboxgl.NavigationControl(), "top-right");
   mapInstance.on("load", () => {
+    mapInstance.setProjection("mercator");
     mapLoaded.value = true;
     refreshMarkers();
   });
