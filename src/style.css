@@ -388,6 +388,13 @@ button:not(:disabled):hover {
   color: #94a3b8;
 }
 
+.coordinate-format-tip {
+  margin: 10px 0 0;
+  color: #dc2626;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .progress {
   display: grid;
   gap: 12px;
@@ -488,6 +495,15 @@ button:not(:disabled):hover {
 
 .map-popup strong {
   font-weight: 600;
+}
+
+.route-origin-circle-marker {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #16a34a;
+  border: 1px solid #ffffff;
+  box-shadow: 0 0 0 1px rgba(22, 163, 74, 0.3);
 }
 
 .map-config {

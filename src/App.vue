@@ -149,6 +149,9 @@
                   <span>经纬度</span>
                 </label>
               </div>
+              <p v-if="routeInputMode === 'coordinate'" class="coordinate-format-tip">
+                经纬度的格式为 “经度,纬度” （经度在前，纬度在后，用英文逗号分隔）
+              </p>
             </div>
             <label class="field">
               <span>起始地列名</span>

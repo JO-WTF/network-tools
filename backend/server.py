@@ -170,8 +170,8 @@ def parse_coordinate(value):
         return None
 
     try:
-        lat = round_coord(parts[0])
-        lng = round_coord(parts[1])
+        lng = round_coord(parts[0])
+        lat = round_coord(parts[1])
     except ValueError:
         return None
 
