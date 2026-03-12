@@ -894,6 +894,7 @@ const startCustomRoute = () => {
       const payload = message.payload || {};
       const routeIndex = Number(payload.index);
       const route = Number.isFinite(routeIndex) ? routes[routeIndex] : null;
+      const routeKey = route ? `${route.origin}=>${route.destination}` : "";
       const address = route ? `${route.origin} -> ${route.destination}` : "-";
       geocodeState.current = address;
 
@@ -946,7 +947,7 @@ const startCustomRoute = () => {
           const pairKey = routePairKey(originLat, originLng, destinationLat, destinationLng);
 
           if (pairKey) {
-            setPersistentCacheValue("route", pairKey, {
+            const routeResult = {
               success: true,
               failed: false,
               distanceKm,
@@ -961,7 +962,11 @@ const startCustomRoute = () => {
               origin: { lat: originLat, lng: originLng },
               destination: { lat: destinationLat, lng: destinationLng },
               key: pairKey,
-            });
+            };
+            setPersistentCacheValue("route", pairKey, routeResult);
+            if (routeKey) {
+              routeCache.set(routeKey, routeResult);
+            }
 
             pushPointIfNeeded({
               lat: originLat,
@@ -1034,6 +1039,13 @@ const startCustomRoute = () => {
               ? { lat: parsedDestination.lat, lng: parsedDestination.lng }
               : null;
 
+        let failedRouteResult = {
+          success: false,
+          type: payload.errorType || "network_error",
+          request: payload.request || "custom",
+          response: payload.response || "请求失败",
+        };
+
         if (originCoords && destinationCoords) {
           pushPointIfNeeded({
             lat: originCoords.lat,
@@ -1067,9 +1079,28 @@ const startCustomRoute = () => {
             },
           });
 
+          failedRouteResult = {
+            ...failedRouteResult,
+            failed: true,
+            distanceKm: "",
+            durationMin: "",
+            origin: { lat: originCoords.lat, lng: originCoords.lng },
+            destination: { lat: destinationCoords.lat, lng: destinationCoords.lng },
+            line: {
+              type: "LineString",
+              coordinates: [
+                [originCoords.lng, originCoords.lat],
+                [destinationCoords.lng, destinationCoords.lat],
+              ],
+            },
+          };
+
           if (mapRealtimeUpdate.value) {
             refreshMarkers();
           }
+        }
+        if (routeKey) {
+          routeCache.set(routeKey, failedRouteResult);
         }
         logs.value.push({
           address,
