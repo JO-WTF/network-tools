@@ -1,4 +1,4 @@
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import mapboxgl from "mapbox-gl";
 import * as XLSX from "xlsx";
 
@@ -2111,6 +2111,20 @@ const initMap = () => {
   });
 };
 
+const destroyMap = () => {
+  if (mapInstance) {
+    mapInstance.remove();
+    mapInstance = null;
+  }
+  mapLoaded.value = false;
+  mapMarkers = [];
+  routeHoverHandlers = null;
+  if (routePopup) {
+    routePopup.remove();
+    routePopup = null;
+  }
+};
+
 const refreshMarkers = () => {
   if (!mapInstance) return;
   mapMarkers.forEach((marker) => marker.remove());
@@ -2624,8 +2638,19 @@ watch(mode, (value) => {
   if (value === "reverse" && provider.value === "custom") {
     provider.value = "mapbox";
   }
+
+  if (value === "visualize") {
+    destroyMap();
+  }
+
   resetFileData();
   resetResults();
+
+  if (value !== "visualize" && mapApiKey.value) {
+    nextTick(() => {
+      initMap();
+    });
+  }
 });
 
   return {
