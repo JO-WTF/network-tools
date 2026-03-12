@@ -78,7 +78,7 @@
           class="secondary action-button"
           type="button"
           :disabled="isProcessing"
-          title="可自动识别geojson和csv格式数据。csv格式必须有一行表头，且表头必须至少有 lon(lng, longitude) 和 lat(latitude) 列"
+          title="可自动识别geojson和csv格式数据。csv格式必须有一行表头，且表头至少包含经度与纬度字段（如：经度/纬度、lon/lng/longitude/long 与 lat/latitude，不区分大小写）"
           @click="triggerFilePicker"
         >
           上传文件
@@ -823,6 +823,8 @@ const parseCoordinatePairsString = (value) => {
 const detectGeometryFromRow = (row) => {
   const keys = Object.keys(row);
   const lowerKeyMap = Object.fromEntries(keys.map((key) => [key.toLowerCase(), key]));
+  const normalizeHeaderKey = (key) => key.toLowerCase().replace(/[\s_-]/g, "");
+  const normalizedKeyMap = Object.fromEntries(keys.map((key) => [normalizeHeaderKey(key), key]));
 
   const wktKey = Object.keys(lowerKeyMap).find((key) =>
     ["wkt", "geometry", "geom", "the_geom"].some((field) => key.includes(field))
@@ -838,11 +840,13 @@ const detectGeometryFromRow = (row) => {
     }
   }
 
-  const lngKey = Object.keys(lowerKeyMap).find((key) => ["lng", "lon", "long", "longitude", "x"].includes(key));
-  const latKey = Object.keys(lowerKeyMap).find((key) => ["lat", "latitude", "y"].includes(key));
+  const lngAliases = ["lng", "lon", "long", "longitude", "x", "经度", "经"];
+  const latAliases = ["lat", "latitude", "y", "纬度", "纬"];
+  const lngKey = Object.keys(normalizedKeyMap).find((key) => lngAliases.includes(key));
+  const latKey = Object.keys(normalizedKeyMap).find((key) => latAliases.includes(key));
   if (lngKey && latKey) {
-    const lng = Number(row[lowerKeyMap[lngKey]]);
-    const lat = Number(row[lowerKeyMap[latKey]]);
+    const lng = Number(row[normalizedKeyMap[lngKey]]);
+    const lat = Number(row[normalizedKeyMap[latKey]]);
     if (Number.isFinite(lng) && Number.isFinite(lat)) {
       return { type: "Point", coordinates: [lng, lat] };
     }
