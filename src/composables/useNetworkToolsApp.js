@@ -47,6 +47,90 @@ const configFileInput = ref(null);
 const geocodeCache = new Map();
 const reverseCache = new Map();
 const routeCache = new Map();
+const PERSISTENT_CACHE_BATCH = 100;
+const persistentCacheBuckets = {
+  geocode: new Map(),
+  reverse: new Map(),
+  route: new Map(),
+};
+
+const buildPersistentScope = (type) => {
+  if (provider.value === "custom") {
+    if (type === "geocode") return `custom|${customGeocodeUrl.value || "default"}`;
+    if (type === "route") return `custom|${customRouteUrl.value || "default"}`;
+    return "custom|reverse";
+  }
+  return `${provider.value}|${type}`;
+};
+
+const getPersistentStorageKey = (type, scope) =>
+  `network_tools_cache_v1_${type}_${encodeURIComponent(scope)}`;
+
+const getPersistentBucket = (type, scope) => {
+  const scopedBuckets = persistentCacheBuckets[type];
+  if (!scopedBuckets) return null;
+  if (scopedBuckets.has(scope)) {
+    return scopedBuckets.get(scope);
+  }
+
+  const storageKey = getPersistentStorageKey(type, scope);
+  let map = new Map();
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        map = new Map(Object.entries(parsed));
+      }
+    }
+  } catch (error) {
+    map = new Map();
+  }
+
+  const bucket = { storageKey, map, pending: 0 };
+  scopedBuckets.set(scope, bucket);
+  return bucket;
+};
+
+const flushPersistentBucket = (bucket) => {
+  if (!bucket || bucket.pending <= 0) return;
+  const serialized = Object.fromEntries(bucket.map.entries());
+  localStorage.setItem(bucket.storageKey, JSON.stringify(serialized));
+  bucket.pending = 0;
+};
+
+const flushAllPersistentCaches = () => {
+  Object.values(persistentCacheBuckets).forEach((scopedBuckets) => {
+    scopedBuckets.forEach((bucket) => {
+      flushPersistentBucket(bucket);
+    });
+  });
+};
+
+const getPersistentCacheValue = (type, requestKey) => {
+  const scope = buildPersistentScope(type);
+  const bucket = getPersistentBucket(type, scope);
+  if (!bucket) return null;
+  return bucket.map.get(requestKey);
+};
+
+const setPersistentCacheValue = (type, requestKey, value) => {
+  if (!requestKey) return;
+  const scope = buildPersistentScope(type);
+  const bucket = getPersistentBucket(type, scope);
+  if (!bucket) return;
+  bucket.map.set(requestKey, value);
+  bucket.pending += 1;
+  if (bucket.pending >= PERSISTENT_CACHE_BATCH) {
+    flushPersistentBucket(bucket);
+  }
+};
+
+
+const cacheAndReturn = (type, requestKey, result) => {
+  setPersistentCacheValue(type, requestKey, result);
+  return result;
+};
 const handledRouteIndices = new Set();
 const renderedPointKeys = new Set();
 const renderedRouteKeys = new Set();
@@ -649,12 +733,14 @@ const startCustomGeocode = () => {
         const locationKey = coordPairKey(normalizedLat, normalizedLng);
 
         if (locationKey) {
-          geocodeCache.set(address, {
+          const geocodeResult = {
             success: true,
             lat: normalizedLat,
             lng: normalizedLng,
             key: locationKey,
-          });
+          };
+          geocodeCache.set(address, geocodeResult);
+          setPersistentCacheValue("geocode", address, geocodeResult);
 
           const indices = addressMap.get(address) || [];
           indices.forEach((rowIndex) => {
@@ -676,6 +762,12 @@ const startCustomGeocode = () => {
           });
         }
       } else {
+        setPersistentCacheValue("geocode", address, {
+          success: false,
+          type: payload.errorType || "network_error",
+          request: payload.request || "custom",
+          response: payload.response || "请求失败",
+        });
         logs.value.push({
           address,
           type: payload.errorType || "network_error",
@@ -688,6 +780,7 @@ const startCustomGeocode = () => {
     if (message.type === "complete") {
       geocodeState.running = false;
       geocodeState.current = "";
+      flushAllPersistentCaches();
       closeCustomSocket();
       refreshMarkers();
     }
@@ -706,8 +799,10 @@ const startCustomGeocode = () => {
     if (geocodeState.running) {
       geocodeState.running = false;
       geocodeState.current = "";
+      flushAllPersistentCaches();
       refreshMarkers();
     }
+    flushAllPersistentCaches();
     closeCustomSocket();
   };
 };
@@ -841,6 +936,22 @@ const startCustomRoute = () => {
           const pairKey = routePairKey(originLat, originLng, destinationLat, destinationLng);
 
           if (pairKey) {
+            setPersistentCacheValue("route", pairKey, {
+              success: true,
+              distanceKm,
+              durationMin,
+              line: {
+                type: "LineString",
+                coordinates: [
+                  [originLng, originLat],
+                  [destinationLng, destinationLat],
+                ],
+              },
+              origin: { lat: originLat, lng: originLng },
+              destination: { lat: destinationLat, lng: destinationLng },
+              key: pairKey,
+            });
+
             pushPointIfNeeded({
               lat: originLat,
               lng: originLng,
@@ -889,6 +1000,23 @@ const startCustomRoute = () => {
           });
         }
       } else {
+        const parsedOrigin = parseRouteCoordinate(route?.origin || "");
+        const parsedDestination = parseRouteCoordinate(route?.destination || "");
+        const pairKey =
+          parsedOrigin.success && parsedDestination.success
+            ? routePairKey(
+                parsedOrigin.lat,
+                parsedOrigin.lng,
+                parsedDestination.lat,
+                parsedDestination.lng
+              )
+            : "";
+        setPersistentCacheValue("route", pairKey, {
+          success: false,
+          type: payload.errorType || "network_error",
+          request: payload.request || "custom",
+          response: payload.response || "请求失败",
+        });
         logs.value.push({
           address,
           type: payload.errorType || "network_error",
@@ -901,6 +1029,7 @@ const startCustomRoute = () => {
     if (message.type === "complete") {
       geocodeState.running = false;
       geocodeState.current = "";
+      flushAllPersistentCaches();
       closeCustomSocket();
       refreshMarkers();
     }
@@ -919,8 +1048,10 @@ const startCustomRoute = () => {
     if (geocodeState.running) {
       geocodeState.running = false;
       geocodeState.current = "";
+      flushAllPersistentCaches();
       refreshMarkers();
     }
+    flushAllPersistentCaches();
     closeCustomSocket();
   };
 };
@@ -945,6 +1076,7 @@ const startGeocode = async () => {
     if (!result) {
       result = await geocodeAddress(address);
       geocodeCache.set(address, result);
+      setPersistentCacheValue("geocode", address, result);
     }
     geocodeState.processed += 1;
 
@@ -968,6 +1100,7 @@ const startGeocode = async () => {
 
   geocodeState.running = false;
   geocodeState.current = "";
+  flushAllPersistentCaches();
   refreshMarkers();
 };
 
@@ -1001,6 +1134,7 @@ const startReverseGeocode = async () => {
     if (!result) {
       result = await reverseGeocode(lat, lng);
       reverseCache.set(parsed.key, result);
+      setPersistentCacheValue("reverse", parsed.key, result);
     }
     geocodeState.processed += 1;
     if (result.success) {
@@ -1029,6 +1163,7 @@ const startReverseGeocode = async () => {
 
   geocodeState.running = false;
   geocodeState.current = "";
+  flushAllPersistentCaches();
   refreshMarkers();
 };
 
@@ -1117,6 +1252,12 @@ const startRoute = async () => {
         continue;
       }
       let result = routeCache.get(routeKey);
+      const pairKey = routePairKey(
+        parsedOrigin.lat,
+        parsedOrigin.lng,
+        parsedDestination.lat,
+        parsedDestination.lng
+      );
       if (!result) {
         result = await fetchRoute(
           parsedOrigin.lat,
@@ -1125,6 +1266,7 @@ const startRoute = async () => {
           parsedDestination.lng
         );
         routeCache.set(routeKey, result);
+        setPersistentCacheValue("route", pairKey, result);
       }
       geocodeState.processed += 1;
       if (result.success) {
@@ -1167,9 +1309,20 @@ const startRoute = async () => {
     if (!result) {
       const originResult = geocodeCache.get(origin) || (await geocodeAddress(origin));
       geocodeCache.set(origin, originResult);
+      setPersistentCacheValue("geocode", origin, originResult);
       const destinationResult =
         geocodeCache.get(destination) || (await geocodeAddress(destination));
       geocodeCache.set(destination, destinationResult);
+      setPersistentCacheValue("geocode", destination, destinationResult);
+      const pairKey =
+        originResult.success && destinationResult.success
+          ? routePairKey(
+              originResult.lat,
+              originResult.lng,
+              destinationResult.lat,
+              destinationResult.lng
+            )
+          : "";
       if (!originResult.success || !destinationResult.success) {
         const failure = !originResult.success ? originResult : destinationResult;
         result = {
@@ -1187,6 +1340,7 @@ const startRoute = async () => {
         );
       }
       routeCache.set(routeKey, result);
+      setPersistentCacheValue("route", pairKey, result);
     }
     geocodeState.processed += 1;
 
@@ -1229,6 +1383,7 @@ const startRoute = async () => {
 
   geocodeState.running = false;
   geocodeState.current = "";
+  flushAllPersistentCaches();
   refreshMarkers();
 };
 
@@ -1251,6 +1406,12 @@ const handleStart = () => {
 };
 
 const geocodeAddress = async (address) => {
+  const requestKey = String(address ?? "").trim();
+  const persistentCached = getPersistentCacheValue("geocode", requestKey);
+  if (persistentCached) {
+    return persistentCached;
+  }
+
   const encoded = encodeURIComponent(address);
   if (provider.value === "custom") {
     const token = await fetchCustomToken();
@@ -1296,12 +1457,12 @@ const geocodeAddress = async (address) => {
       }
       const lat = normalizeCoordinate(location.lat);
       const lng = normalizeCoordinate(location.lng);
-      return {
+      return cacheAndReturn("geocode", requestKey, {
         success: true,
         lat,
         lng,
         key: coordPairKey(lat, lng),
-      };
+      });
     } catch (error) {
       return {
         success: false,
@@ -1343,7 +1504,12 @@ const geocodeAddress = async (address) => {
           response: JSON.stringify(body),
         };
       }
-      return { success: true, lat, lng, key: coordPairKey(lat, lng) };
+      return cacheAndReturn("geocode", requestKey, {
+        success: true,
+        lat,
+        lng,
+        key: coordPairKey(lat, lng),
+      });
     } catch (error) {
       return {
         success: false,
@@ -1385,7 +1551,12 @@ const geocodeAddress = async (address) => {
         response: JSON.stringify(body),
       };
     }
-    return { success: true, lat, lng, key: coordPairKey(lat, lng) };
+    return cacheAndReturn("geocode", requestKey, {
+      success: true,
+      lat,
+      lng,
+      key: coordPairKey(lat, lng),
+    });
   } catch (error) {
     return {
       success: false,
@@ -1424,6 +1595,13 @@ const fetchCustomToken = async () => {
 const reverseGeocode = async (lat, lng) => {
   const normalizedLat = normalizeCoordinate(lat);
   const normalizedLng = normalizeCoordinate(lng);
+  const requestKey = coordPairKey(normalizedLat, normalizedLng);
+  const persistentCached = requestKey
+    ? getPersistentCacheValue("reverse", requestKey)
+    : null;
+  if (persistentCached) {
+    return persistentCached;
+  }
 
   if (provider.value === "mapbox") {
     const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${normalizedLng},${normalizedLat}.json?access_token=${providerApiKey.value}`;
@@ -1448,13 +1626,13 @@ const reverseGeocode = async (lat, lng) => {
       }
       const feature = body.features[0];
       const { admin1, admin2, admin3 } = extractMapboxAdmin(feature);
-      return {
+      return cacheAndReturn("reverse", requestKey, {
         success: true,
         address: feature.place_name,
         admin1,
         admin2,
         admin3,
-      };
+      });
     } catch (error) {
       return {
         success: false,
@@ -1486,13 +1664,13 @@ const reverseGeocode = async (lat, lng) => {
       };
     }
     const address = body.items[0].address || {};
-    return {
+    return cacheAndReturn("reverse", requestKey, {
       success: true,
       address: body.items[0].title || "",
       admin1: address.state || address.province || "",
       admin2: address.city || address.county || "",
       admin3: address.district || address.subdistrict || address.county || "",
-    };
+    });
   } catch (error) {
     return {
       success: false,
@@ -1514,6 +1692,10 @@ const fetchRoute = async (originLat, originLng, destLat, destLng) => {
     normalizedDestLat,
     normalizedDestLng
   );
+  const persistentCached = pairKey ? getPersistentCacheValue("route", pairKey) : null;
+  if (persistentCached) {
+    return persistentCached;
+  }
 
   if (provider.value === "mapbox") {
     const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${normalizedOriginLng},${normalizedOriginLat};${normalizedDestLng},${normalizedDestLat}?geometries=geojson&overview=full&access_token=${providerApiKey.value}`;
@@ -1547,7 +1729,7 @@ const fetchRoute = async (originLat, originLng, destLat, destLng) => {
           }
         : null;
 
-      return {
+      return cacheAndReturn("route", pairKey, {
         success: true,
         distanceKm: (route.distance / 1000).toFixed(2),
         durationMin: Math.round(route.duration / 60),
@@ -1555,7 +1737,7 @@ const fetchRoute = async (originLat, originLng, destLat, destLng) => {
         origin: { lat: normalizedOriginLat, lng: normalizedOriginLng },
         destination: { lat: normalizedDestLat, lng: normalizedDestLng },
         key: pairKey,
-      };
+      });
     } catch (error) {
       return {
         success: false,
@@ -1590,7 +1772,7 @@ const fetchRoute = async (originLat, originLng, destLat, destLng) => {
     const summary = route.sections?.[0]?.summary;
     const polyline = route.sections?.[0]?.polyline;
     const geometry = polyline ? decodeHerePolyline(polyline) : null;
-    return {
+    return cacheAndReturn("route", pairKey, {
       success: true,
       distanceKm: summary ? (summary.length / 1000).toFixed(2) : "",
       durationMin: summary ? Math.round(summary.duration / 60) : "",
@@ -1598,7 +1780,7 @@ const fetchRoute = async (originLat, originLng, destLat, destLng) => {
       origin: { lat: normalizedOriginLat, lng: normalizedOriginLng },
       destination: { lat: normalizedDestLat, lng: normalizedDestLng },
       key: pairKey,
-    };
+    });
   } catch (error) {
     return {
       success: false,
