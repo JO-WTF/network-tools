@@ -725,6 +725,13 @@ button:not(:disabled):hover {
   color: #334155;
 }
 
+.add-field-btn {
+  border-style: solid !important;
+  border-color: #d1d5db !important;
+  background: #ffffff;
+  color: #334155;
+}
+
 .filter-row .small.active {
   background: #2563eb;
   border-color: #2563eb;

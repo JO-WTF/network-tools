@@ -132,7 +132,7 @@
           >
             面
           </button>
-          <button type="button" class="secondary small" @click="addColumnField">新增字段</button>
+          <button type="button" class="secondary small add-field-btn" @click="addColumnField">新增字段</button>
         </div>
         <div class="pager-row">
           <button class="secondary small" type="button" :disabled="currentPage <= 1" @click="changePage(currentPage - 1)">上一页</button>
