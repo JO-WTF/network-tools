@@ -199,6 +199,12 @@
 
       <section class="map-panel">
         <div class="map-wrapper">
+          <div class="map-toolbar">
+            <label class="map-live-toggle">
+              <input v-model="mapRealtimeUpdate" type="checkbox" />
+              <span>地图实时更新</span>
+            </label>
+          </div>
           <div ref="mapContainer" class="map"></div>
           <div v-if="!mapLoaded" class="map-config">
             <h3>地图配置</h3>
@@ -328,6 +334,7 @@ const {
   isDragging,
   dropzoneFlash,
   mockAnimating,
+  mapRealtimeUpdate,
   mode,
   modeOptions,
   canStart,

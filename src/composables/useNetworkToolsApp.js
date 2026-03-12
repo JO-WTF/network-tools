@@ -139,6 +139,7 @@ const mapLoaded = ref(false);
 const isDragging = ref(false);
 const dropzoneFlash = ref(false);
 const mockAnimating = ref(false);
+const mapRealtimeUpdate = ref(true);
 const geocodeState = reactive({
   total: 0,
   processed: 0,
@@ -185,6 +186,7 @@ const storageKeys = {
   endColumnName: "route_end_column_name",
   routeInputMode: "route_input_mode",
   mode: "geocode_mode",
+  mapRealtimeUpdate: "map_realtime_update",
 };
 
 const getProviderStorageKey = (currentProvider) =>
@@ -753,6 +755,10 @@ const startCustomGeocode = () => {
             lng: normalizedLng,
             address,
           });
+
+          if (mapRealtimeUpdate.value) {
+            refreshMarkers();
+          }
         } else {
           logs.value.push({
             address,
@@ -782,7 +788,9 @@ const startCustomGeocode = () => {
       geocodeState.current = "";
       flushAllPersistentCaches();
       closeCustomSocket();
-      refreshMarkers();
+      if (mapRealtimeUpdate.value) {
+        refreshMarkers();
+      }
     }
   };
 
@@ -800,7 +808,9 @@ const startCustomGeocode = () => {
       geocodeState.running = false;
       geocodeState.current = "";
       flushAllPersistentCaches();
-      refreshMarkers();
+      if (mapRealtimeUpdate.value) {
+        refreshMarkers();
+      }
     }
     flushAllPersistentCaches();
     closeCustomSocket();
@@ -982,7 +992,9 @@ const startCustomRoute = () => {
               },
             });
 
-            refreshMarkers();
+            if (mapRealtimeUpdate.value) {
+              refreshMarkers();
+            }
           } else {
             logs.value.push({
               address,
@@ -1031,7 +1043,9 @@ const startCustomRoute = () => {
       geocodeState.current = "";
       flushAllPersistentCaches();
       closeCustomSocket();
-      refreshMarkers();
+      if (mapRealtimeUpdate.value) {
+        refreshMarkers();
+      }
     }
   };
 
@@ -1049,7 +1063,9 @@ const startCustomRoute = () => {
       geocodeState.running = false;
       geocodeState.current = "";
       flushAllPersistentCaches();
-      refreshMarkers();
+      if (mapRealtimeUpdate.value) {
+        refreshMarkers();
+      }
     }
     flushAllPersistentCaches();
     closeCustomSocket();
@@ -2256,6 +2272,10 @@ onMounted(() => {
   if (savedRouteInputMode === "address" || savedRouteInputMode === "coordinate") {
     routeInputMode.value = savedRouteInputMode;
   }
+  const savedMapRealtimeUpdate = localStorage.getItem(storageKeys.mapRealtimeUpdate);
+  if (savedMapRealtimeUpdate === "0") {
+    mapRealtimeUpdate.value = false;
+  }
   const savedKey = localStorage.getItem(storageKeys.mapboxMap);
   if (savedKey) {
     mapApiKey.value = savedKey;
@@ -2428,6 +2448,13 @@ watch(routeInputMode, (value) => {
   }
 });
 
+watch(mapRealtimeUpdate, (value, oldValue) => {
+  localStorage.setItem(storageKeys.mapRealtimeUpdate, value ? "1" : "0");
+  if (value && oldValue === false) {
+    refreshMarkers();
+  }
+});
+
 watch(mode, (value) => {
   localStorage.setItem(storageKeys.mode, value);
   if (value === "reverse" && provider.value === "custom") {
@@ -2473,6 +2500,7 @@ watch(mode, (value) => {
     isDragging,
     dropzoneFlash,
     mockAnimating,
+    mapRealtimeUpdate,
     points,
     routeLines,
     mode,
