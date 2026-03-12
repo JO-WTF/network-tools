@@ -198,7 +198,6 @@ async def fetch_route(session, token, config, origin, destination, route_cache, 
             "response": "缺少导航接口地址",
         }
         route_cache[cache_key] = result
-        persistent_cache.set(persistent_cache_key, result)
         return result
 
     headers = {"Content-Type": "application/json"}
@@ -223,7 +222,6 @@ async def fetch_route(session, token, config, origin, destination, route_cache, 
                 "response": json.dumps(data, ensure_ascii=False),
             }
             route_cache[cache_key] = result
-            persistent_cache.set(persistent_cache_key, result)
             return result
 
         distance_value = (data.get("distance") or {}).get("value")
@@ -236,7 +234,6 @@ async def fetch_route(session, token, config, origin, destination, route_cache, 
                 "response": json.dumps(data, ensure_ascii=False),
             }
             route_cache[cache_key] = result
-            persistent_cache.set(persistent_cache_key, result)
             return result
 
         result = {

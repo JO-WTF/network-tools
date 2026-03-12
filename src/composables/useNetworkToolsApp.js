@@ -948,6 +948,7 @@ const startCustomRoute = () => {
           if (pairKey) {
             setPersistentCacheValue("route", pairKey, {
               success: true,
+              failed: false,
               distanceKm,
               durationMin,
               line: {
@@ -975,6 +976,7 @@ const startCustomRoute = () => {
               lat: destinationLat,
               lng: destinationLng,
               type: "destination",
+              failed: false,
               label: "终点",
               address: route.destination,
               displayMode: routeInputMode.value === "coordinate" ? "coordinate-only" : "full",
@@ -983,6 +985,7 @@ const startCustomRoute = () => {
             pushRouteLineIfNeeded({
               distanceKm,
               durationMin,
+              failed: false,
               geometry: {
                 type: "LineString",
                 coordinates: [
@@ -1012,23 +1015,62 @@ const startCustomRoute = () => {
           });
         }
       } else {
+        const payloadOriginLat = normalizeCoordinate(payload.originLat);
+        const payloadOriginLng = normalizeCoordinate(payload.originLng);
+        const payloadDestinationLat = normalizeCoordinate(payload.destinationLat);
+        const payloadDestinationLng = normalizeCoordinate(payload.destinationLng);
         const parsedOrigin = parseRouteCoordinate(route?.origin || "");
         const parsedDestination = parseRouteCoordinate(route?.destination || "");
-        const pairKey =
-          parsedOrigin.success && parsedDestination.success
-            ? routePairKey(
-                parsedOrigin.lat,
-                parsedOrigin.lng,
-                parsedDestination.lat,
-                parsedDestination.lng
-              )
-            : "";
-        setPersistentCacheValue("route", pairKey, {
-          success: false,
-          type: payload.errorType || "network_error",
-          request: payload.request || "custom",
-          response: payload.response || "请求失败",
-        });
+        const originCoords =
+          Number.isFinite(payloadOriginLat) && Number.isFinite(payloadOriginLng)
+            ? { lat: payloadOriginLat, lng: payloadOriginLng }
+            : parsedOrigin.success
+              ? { lat: parsedOrigin.lat, lng: parsedOrigin.lng }
+              : null;
+        const destinationCoords =
+          Number.isFinite(payloadDestinationLat) && Number.isFinite(payloadDestinationLng)
+            ? { lat: payloadDestinationLat, lng: payloadDestinationLng }
+            : parsedDestination.success
+              ? { lat: parsedDestination.lat, lng: parsedDestination.lng }
+              : null;
+
+        if (originCoords && destinationCoords) {
+          pushPointIfNeeded({
+            lat: originCoords.lat,
+            lng: originCoords.lng,
+            type: "origin",
+            label: "起点",
+            address: route?.origin,
+            displayMode: routeInputMode.value === "coordinate" ? "coordinate-only" : "full",
+          });
+
+          pushPointIfNeeded({
+            lat: destinationCoords.lat,
+            lng: destinationCoords.lng,
+            type: "destination",
+            failed: true,
+            label: "终点",
+            address: route?.destination,
+            displayMode: routeInputMode.value === "coordinate" ? "coordinate-only" : "full",
+          });
+
+          pushRouteLineIfNeeded({
+            distanceKm: "",
+            durationMin: "",
+            failed: true,
+            geometry: {
+              type: "LineString",
+              coordinates: [
+                [originCoords.lng, originCoords.lat],
+                [destinationCoords.lng, destinationCoords.lat],
+              ],
+            },
+          });
+
+          if (mapRealtimeUpdate.value) {
+            refreshMarkers();
+          }
+        }
         logs.value.push({
           address,
           type: payload.errorType || "network_error",
@@ -1282,7 +1324,9 @@ const startRoute = async () => {
           parsedDestination.lng
         );
         routeCache.set(routeKey, result);
-        setPersistentCacheValue("route", pairKey, result);
+        if (result.success) {
+          setPersistentCacheValue("route", pairKey, result);
+        }
       }
       geocodeState.processed += 1;
       if (result.success) {
@@ -1301,6 +1345,7 @@ const startRoute = async () => {
           lat: normalizeCoordinate(parsedDestination.lat),
           lng: normalizeCoordinate(parsedDestination.lng),
           type: "destination",
+          failed: false,
           label: "终点",
           displayMode: "coordinate-only",
         });
@@ -1308,9 +1353,43 @@ const startRoute = async () => {
         pushRouteLineIfNeeded({
           distanceKm: result.distanceKm,
           durationMin: result.durationMin,
+          failed: false,
           geometry: result.line,
         });
       } else {
+        pushPointIfNeeded({
+          lat: normalizeCoordinate(parsedOrigin.lat),
+          lng: normalizeCoordinate(parsedOrigin.lng),
+          type: "origin",
+          label: "起点",
+          displayMode: "coordinate-only",
+        });
+
+        pushPointIfNeeded({
+          lat: normalizeCoordinate(parsedDestination.lat),
+          lng: normalizeCoordinate(parsedDestination.lng),
+          type: "destination",
+          failed: true,
+          label: "终点",
+          displayMode: "coordinate-only",
+        });
+
+        pushRouteLineIfNeeded({
+          distanceKm: "",
+          durationMin: "",
+          failed: true,
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [normalizeCoordinate(parsedOrigin.lng), normalizeCoordinate(parsedOrigin.lat)],
+              [
+                normalizeCoordinate(parsedDestination.lng),
+                normalizeCoordinate(parsedDestination.lat),
+              ],
+            ],
+          },
+        });
+
         logs.value.push({
           address: routeKey,
           type: result.type,
@@ -1356,7 +1435,9 @@ const startRoute = async () => {
         );
       }
       routeCache.set(routeKey, result);
-      setPersistentCacheValue("route", pairKey, result);
+      if (result.success) {
+        setPersistentCacheValue("route", pairKey, result);
+      }
     }
     geocodeState.processed += 1;
 
@@ -1377,6 +1458,7 @@ const startRoute = async () => {
         lat: normalizeCoordinate(result.destination.lat),
         lng: normalizeCoordinate(result.destination.lng),
         type: "destination",
+        failed: false,
         label: "终点",
         address: destination,
         displayMode: "full",
@@ -1385,9 +1467,51 @@ const startRoute = async () => {
       pushRouteLineIfNeeded({
         distanceKm: result.distanceKm,
         durationMin: result.durationMin,
+        failed: false,
         geometry: result.line,
       });
     } else {
+      if (routeInputMode.value === "address") {
+        const originResult = geocodeCache.get(origin);
+        const destinationResult = geocodeCache.get(destination);
+        if (originResult?.success && destinationResult?.success) {
+          pushPointIfNeeded({
+            lat: normalizeCoordinate(originResult.lat),
+            lng: normalizeCoordinate(originResult.lng),
+            type: "origin",
+            label: "起点",
+            address: origin,
+            displayMode: "full",
+          });
+
+          pushPointIfNeeded({
+            lat: normalizeCoordinate(destinationResult.lat),
+            lng: normalizeCoordinate(destinationResult.lng),
+            type: "destination",
+            failed: true,
+            label: "终点",
+            address: destination,
+            displayMode: "full",
+          });
+
+          pushRouteLineIfNeeded({
+            distanceKm: "",
+            durationMin: "",
+            failed: true,
+            geometry: {
+              type: "LineString",
+              coordinates: [
+                [normalizeCoordinate(originResult.lng), normalizeCoordinate(originResult.lat)],
+                [
+                  normalizeCoordinate(destinationResult.lng),
+                  normalizeCoordinate(destinationResult.lat),
+                ],
+              ],
+            },
+          });
+        }
+      }
+
       logs.value.push({
         address: routeKey,
         type: result.type,
@@ -1972,7 +2096,9 @@ const refreshMarkers = () => {
             point.type === "origin"
               ? "#16a34a"
               : point.type === "destination"
-                ? "#dc2626"
+                ? point.failed
+                  ? "#dc2626"
+                  : "#7c3aed"
                 : "#2563eb",
         });
     marker.setLngLat([point.lng, point.lat]).addTo(mapInstance);
@@ -2006,6 +2132,7 @@ const buildRouteFeatureCollection = () => ({
     properties: {
       distanceKm: line.distanceKm ?? "",
       durationMin: line.durationMin ?? "",
+      failed: Boolean(line.failed),
     },
     geometry: line.geometry,
   })),
@@ -2035,7 +2162,7 @@ const updateRouteLayer = () => {
         "line-cap": "round",
       },
       paint: {
-        "line-color": "#0ea5e9",
+        "line-color": ["case", ["==", ["get", "failed"], true], "#dc2626", "#0ea5e9"],
         "line-width": 1,
         "line-dasharray": [2, 2],
       },
@@ -2081,9 +2208,15 @@ const attachRouteHover = (layerId) => {
 };
 
 const buildPointMarkerElement = (point) => {
-  if (mode.value === "route" && point.type === "origin") {
+  if (mode.value === "route" && (point.type === "origin" || point.type === "destination")) {
     const el = document.createElement("div");
-    el.className = "route-origin-circle-marker";
+    if (point.type === "origin") {
+      el.className = "route-origin-circle-marker";
+    } else if (point.failed) {
+      el.className = "route-destination-circle-marker-failed";
+    } else {
+      el.className = "route-destination-circle-marker";
+    }
     return el;
   }
   return null;

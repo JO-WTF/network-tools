@@ -531,6 +531,24 @@ button:not(:disabled):hover {
   box-shadow: 0 0 0 1px rgba(22, 163, 74, 0.3);
 }
 
+.route-destination-circle-marker {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #7c3aed;
+  border: 1px solid #ffffff;
+  box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.3);
+}
+
+.route-destination-circle-marker-failed {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #dc2626;
+  border: 1px solid #ffffff;
+  box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.3);
+}
+
 .map-config {
   position: absolute;
   right: 16px;
