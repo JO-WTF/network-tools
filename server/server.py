@@ -1,6 +1,6 @@
 """Backward-compatible entrypoint.
 
-Use `python -m server.app` from backend directory for the new architecture.
+Use `python -m server.app` from repository root for the new architecture.
 """
 
 from server.app import main
